@@ -1,5 +1,14 @@
 # Bot de estrategia Solana (papel)
 
+> **Empieza aquí**
+> - **Cómo funciona y cómo usarlo:** [docs/GUIA-DE-USO.md](docs/GUIA-DE-USO.md)
+> - **Correrlo en tu PC (modo sombra + Meteora):** [docs/CORRER-EN-CASA.md](docs/CORRER-EN-CASA.md)
+> - **Desplegarlo 24/7 en Google Cloud u Oracle:** [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md)
+> - **Diseño del paso a dinero real:** [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md)
+> - **Para asistentes de IA (Grok, etc.):** [AGENTS.md](AGENTS.md). Dáselo antes de pedir cambios.
+>
+> Inicio rápido: `npm install` → `npm run dev` → http://127.0.0.1:47231 · Tests: `npm test`
+
 Trading bot driven by technical analysis on real market data. It trades SOL and liquid Solana-ecosystem tokens (plus BTC/ETH) on **paper**, with the exact same bar-by-bar logic as its backtester, so the paper record is directly comparable to the backtest. It never signs or sends a transaction and never asks for a private key.
 
 ## Why it changed from the copy desk
