@@ -250,6 +250,8 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
             </CardContent>
           </Card>
 
+          <ShadowCard shadow={view.shadow} />
+
           {view.markets.map((market) => (
             <MarketCard
               key={market.id}
@@ -554,6 +556,73 @@ function MarketCard({ market, busy, onClose }: { market: MarketView; busy: boole
             </div>
           </details>
         ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function bps(value: number | null): string {
+  return value === null ? "—" : `${value.toFixed(0)} bps`;
+}
+
+function ShadowCard({ shadow }: { shadow: BotView["shadow"] }) {
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          Modo sombra: costo real en Jupiter
+          <Badge variant={shadow.enabled ? "default" : "outline"}>{shadow.enabled ? "Activo" : "Apagado"}</Badge>
+        </CardTitle>
+        <CardDescription>
+          Cada operación en papel, y una prueba por hora en cada mercado, se cotiza en Jupiter sin firmar nada. Así se mide cuánto costaría de verdad frente a los {shadow.assumedBps} bps por lado que supone el backtest.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        {!shadow.enabled ? (
+          <p className="text-muted-foreground">
+            Para activarlo agrega <code className="num">LIVE_MODE=shadow</code> y <code className="num">JUPITER_API_KEY=...</code> en <code className="num">.env.local</code> (en tu PC) o en <code className="num">/etc/solana-bot.env</code> (en la VM) y reinicia el bot.
+          </p>
+        ) : (
+          <>
+            <p className="text-muted-foreground">
+              {shadow.total} cotizaciones · última correcta {when(shadow.lastOkAt)}
+            </p>
+            {shadow.error ? <p className="text-destructive">{shadow.error}</p> : null}
+            {shadow.verdict ? <p className={shadow.verdict.ok ? "gain" : "text-amber-400"}>{shadow.verdict.text}</p> : null}
+            {shadow.rows.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Mercado</TableHead>
+                    <TableHead>Muestras</TableHead>
+                    <TableHead>Compra (mediana)</TableHead>
+                    <TableHead>Venta (mediana)</TableHead>
+                    <TableHead>Peor 10%</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shadow.rows.map((row) => (
+                    <TableRow key={row.market}>
+                      <TableCell>
+                        {row.market}
+                        {row.suspicious > 0 ? <span className="block text-xs text-amber-400">{row.suspicious} sospechosas</span> : null}
+                      </TableCell>
+                      <TableCell className="num">{row.n}</TableCell>
+                      <TableCell className={`num ${row.buyMedian !== null && row.buyMedian > shadow.assumedBps ? "loss" : ""}`}>{bps(row.buyMedian)}</TableCell>
+                      <TableCell className={`num ${row.sellMedian !== null && row.sellMedian > shadow.assumedBps ? "loss" : ""}`}>{bps(row.sellMedian)}</TableCell>
+                      <TableCell className="num">{bps(row.p90)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-muted-foreground">Las primeras cotizaciones llegan en el próximo ciclo (~15 s).</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              El costo incluye la comisión del pool, el impacto de precio y la diferencia entre el precio de Binance (USDT) y el de Solana (USDC). Por eso una muestra suelta puede salir negativa; lo que importa es la mediana.
+            </p>
+          </>
+        )}
       </CardContent>
     </Card>
   );

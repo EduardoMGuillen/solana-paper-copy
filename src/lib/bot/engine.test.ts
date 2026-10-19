@@ -50,6 +50,10 @@ describe("live engine", () => {
       expect(book.sleeve.trades.map((t) => t.entryT)).toEqual(bt.trades.map((t) => t.entryT));
       expect(book.sleeve.trades.map((t) => t.exitT)).toEqual(bt.trades.map((t) => t.exitT));
       expect(book.sleeve.trades.map((t) => t.pnl.toFixed(9))).toEqual(bt.trades.map((t) => t.pnl.toFixed(9)));
+      // Every paper buy and sell is queued for the shadow executor (capped at the last 50).
+      const fills = state.fillQueue ?? [];
+      expect(fills.length).toBe(Math.min(50, bt.trades.length * 2 + (book.sleeve.position ? 1 : 0)));
+      expect(fills.every((f) => f.market === "SOL" && f.usd > 0 && f.qty > 0)).toBe(true);
     });
   }
 

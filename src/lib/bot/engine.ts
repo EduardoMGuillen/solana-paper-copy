@@ -17,6 +17,7 @@ import {
   type StepEvent,
 } from "./sleeve";
 import { computeIndicators, STRATEGIES, STRATEGY_IDS, type StrategyId } from "./strategies";
+import type { ShadowState } from "../exec/shadow";
 
 export const STARTING_USD = 100;
 const CURVE_CAP = 2_000;
@@ -56,6 +57,11 @@ export type MarketBook = {
 
 export type BotTrade = ClosedTrade & { id: string; market: string; strategy: StrategyId | null };
 
+/** One paper fill, as the shadow executor needs it to ask Jupiter what it would really cost. */
+export type PaperFill = { t: number; market: string; side: "buy" | "sell"; usd: number; qty: number; paperPrice: number };
+
+const FILL_QUEUE_CAP = 50;
+
 export type LogLine = {
   id: string;
   t: number;
@@ -83,6 +89,9 @@ export type BotState = {
   log: LogLine[];
   /** Highest log sequence already sent to Telegram. */
   notifiedSeq?: number;
+  /** Paper fills waiting for a real Jupiter quote (shadow mode). Drained by the service. */
+  fillQueue?: PaperFill[];
+  shadow?: ShadowState;
   equityCurve: { t: number; equity: number }[];
   peakEquity: number;
   halt: {
@@ -192,6 +201,11 @@ export function entriesAllowed(state: BotState): boolean {
 
 function recordEvents(state: BotState, book: MarketBook, events: StepEvent[], strategy: StrategyId | null): void {
   for (const event of events) {
+    const fill: PaperFill =
+      event.type === "buy"
+        ? { t: event.t, market: book.id, side: "buy", usd: event.cost, qty: event.qty, paperPrice: event.price }
+        : { t: event.trade.exitT, market: book.id, side: "sell", usd: event.trade.qty * event.trade.exitPrice, qty: event.trade.qty, paperPrice: event.trade.exitPrice };
+    state.fillQueue = [...(state.fillQueue ?? []), fill].slice(-FILL_QUEUE_CAP);
     if (event.type === "buy") {
       addLog(state, event.t, book.id, `Compra a ${event.price.toPrecision(5)} · ${event.note}`, "buy");
       continue;

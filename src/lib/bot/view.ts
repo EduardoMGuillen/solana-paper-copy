@@ -1,6 +1,8 @@
 import { accountEquity, bookEquity, entriesAllowed, type BotState, type MarketBook } from "./engine";
 import type { Candle } from "./indicators";
 import { closedOnly, marketById } from "./market";
+import { jupiterConfig } from "../exec/jupiter";
+import { shadowVerdict, summarizeShadow } from "../exec/shadow";
 import { telegramConfig } from "../notify/telegram";
 import { PROFILES, profileOf } from "./settings";
 import { computeIndicators, STRATEGIES, STRATEGY_IDS, type Indicators, type StrategyId } from "./strategies";
@@ -149,6 +151,21 @@ export function toView(state: BotState, candles: Map<string, Candle[]>) {
     settings: state.settings,
     profile: profileOf(state.settings),
     telegram: Boolean(telegramConfig()),
+    shadow: (() => {
+      const quotes = state.shadow?.quotes ?? [];
+      const rows = summarizeShadow(quotes);
+      const assumedBps = state.settings.feeBps + state.settings.slippageBps;
+      return {
+        enabled: Boolean(jupiterConfig()),
+        assumedBps,
+        lastOkAt: state.shadow?.lastOkAt ?? null,
+        error: state.shadow?.error ?? null,
+        total: quotes.length,
+        rows,
+        verdict: shadowVerdict(rows, assumedBps),
+        recentTrades: quotes.filter((q) => q.kind === "trade").slice(-6).reverse(),
+      };
+    })(),
     profiles: Object.entries(PROFILES).map(([id, p]) => ({ id, name: p.name, summary: p.summary })),
     strategies: STRATEGY_IDS.map((id: StrategyId) => ({ id, name: STRATEGIES[id].name, summary: STRATEGIES[id].summary })),
     account: {

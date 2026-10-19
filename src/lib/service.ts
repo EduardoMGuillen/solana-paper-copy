@@ -15,6 +15,9 @@ import type { Candle } from "./bot/indicators";
 import { fetchCandles, marketById, type Interval } from "./bot/market";
 import { clampBotSettings, PROFILES, type BotSettings, type ProfileId } from "./bot/settings";
 import { toView, type BotView } from "./bot/view";
+import { jupiterConfig } from "./exec/jupiter";
+import { applyShadowOutcome, planShadowJobs, runShadowJobs } from "./exec/runner";
+import { emptyShadow } from "./exec/shadow";
 import { formatAlerts, logSeq, pendingAlerts, sendTelegram, telegramConfig } from "./notify/telegram";
 import { loadState, saveState } from "./store";
 
@@ -76,6 +79,25 @@ function message(error: unknown): string {
 function setBookError(state: BotState, book: BotState["books"][number], error: string): void {
   if (!book.error) addLog(state, Date.now(), book.id, `Sin datos de mercado: ${error}`, "warn");
   book.error = error;
+}
+
+/**
+ * Shadow mode (LIVE_MODE=shadow + JUPITER_API_KEY): price every paper fill
+ * and an hourly probe per market on Jupiter, without signing anything.
+ */
+async function shadow(): Promise<void> {
+  const config = jupiterConfig();
+  if (!config) return;
+  const plan = await withState((state) => ({
+    jobs: planShadowJobs(state, Date.now()),
+    decimals: { ...(state.shadow ?? emptyShadow()).decimals },
+  }));
+  if (plan.jobs.length === 0) return;
+  const outcome = await runShadowJobs(plan.jobs, config, plan.decimals);
+  await withState(async (state) => {
+    applyShadowOutcome(state, outcome, Date.now());
+    await saveState(state);
+  });
 }
 
 /** Send pending alert lines to Telegram. On failure they stay pending for the next tick. */
@@ -163,6 +185,7 @@ export async function tick(): Promise<void> {
       markAccount(state, Date.now());
       await saveState(state);
     });
+    await shadow();
     await notify();
   } finally {
     g.__botTicking = false;

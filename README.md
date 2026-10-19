@@ -104,6 +104,10 @@ See [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). One command (`su
 
 The whole app (dashboard and API) is behind HTTP Basic auth when `BOT_PASSWORD` is set. Without it, the app answers on localhost only.
 
+## Shadow mode (real Jupiter costs, no signing)
+
+With `LIVE_MODE=shadow` and `JUPITER_API_KEY` set, every paper fill and an hourly probe per market are quoted on Jupiter Swap API v2 **without a taker**, so no transaction is ever returned to sign. The dashboard compares the real cost per side with the backtest's assumption. Running it at home: [docs/CORRER-EN-CASA.md](docs/CORRER-EN-CASA.md). Template: `.env.example`.
+
 ## Telegram alerts
 
 Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (on the VM: `/etc/solana-bot.env`). The bot then sends buys, sells, risk halts, strategy changes, data-feed outages and a daily summary, batched once per tick. Setup steps are in the deploy guide.

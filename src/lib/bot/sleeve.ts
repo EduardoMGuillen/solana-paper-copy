@@ -144,7 +144,7 @@ function buy(
 }
 
 export type StepEvent =
-  | { type: "buy"; t: number; price: number; note: string }
+  | { type: "buy"; t: number; price: number; qty: number; cost: number; note: string }
   | { type: "sell"; trade: ClosedTrade };
 
 /** Fill a pending order at a bar's open. Safe to call on a still-forming bar. */
@@ -165,7 +165,7 @@ export function fillAtOpen(
   }
   if (!allowEntries || sleeve.position) return [];
   return buy(sleeve, bar.o, pending.stop, bar.t, pending.note, costs, sizing)
-    ? [{ type: "buy", t: bar.t, price: sleeve.position!.entryPrice, note: pending.note }]
+    ? [{ type: "buy", t: bar.t, price: sleeve.position!.entryPrice, qty: sleeve.position!.qty, cost: sleeve.position!.cost, note: pending.note }]
     : [];
 }
 
