@@ -1,127 +1,162 @@
-import { stepDemo } from "./engine/demo";
 import {
-  addWalletLeader,
-  applyFill,
-  applyMeteoraRoster,
-  applyProtectiveStops,
   applySettings,
-  markMeteoraUnavailable,
-  removeLeader,
-  rollover,
-  setKill,
-  setLeaderEnabled,
-} from "./engine/engine";
-import { clampSettings } from "./engine/settings";
-import type { EngineState, RiskSettings } from "./engine/types";
-import { toView, type DeskView } from "./engine/view";
-import { writeEffectiveness } from "./effectiveness";
-import { fetchMeteoraTop } from "./meteora";
-import { pollWalletSwaps } from "./rpc";
+  applyValidation,
+  closeMarket,
+  createBotState,
+  markAccount,
+  onCandles,
+  setHalt,
+  validateMarket,
+  validationDue,
+  type BotState,
+} from "./bot/engine";
+import type { Candle } from "./bot/indicators";
+import { fetchCandles, marketById, type Interval } from "./bot/market";
+import { clampBotSettings, type BotSettings } from "./bot/settings";
+import { toView, type BotView } from "./bot/view";
 import { loadState, saveState } from "./store";
 
-const g = globalThis as unknown as { __paperQueue?: Promise<unknown> };
+const POLL_MS = 30_000;
+const LIVE_BARS = 600;
+const VALIDATION_BARS: Record<Interval, number> = { "1h": 8_000, "4h": 6_000, "1d": 2_000 };
 
-export function withState<T>(fn: (state: EngineState) => Promise<T>): Promise<T> {
-  const previous = g.__paperQueue ?? Promise.resolve();
-  const job = previous.then(() => loadState()).then(fn);
-  g.__paperQueue = job.then(
+const g = globalThis as unknown as {
+  __botQueue?: Promise<unknown>;
+  __botState?: BotState;
+  __botLoop?: ReturnType<typeof setInterval>;
+  __botTicking?: boolean;
+  /** Latest candles per market, for the charts. Memory only. */
+  __botCandles?: Map<string, Candle[]>;
+};
+
+function candleCache(): Map<string, Candle[]> {
+  g.__botCandles ??= new Map();
+  return g.__botCandles;
+}
+
+/** Serialize every read-modify-write of the state. */
+export function withState<T>(fn: (state: BotState) => Promise<T> | T): Promise<T> {
+  const previous = g.__botQueue ?? Promise.resolve();
+  const job = previous.then(async () => {
+    g.__botState ??= await loadState();
+    return fn(g.__botState);
+  });
+  g.__botQueue = job.then(
     () => undefined,
     () => undefined,
   );
   return job;
 }
 
-async function refreshMeteora(state: EngineState, now: number): Promise<void> {
-  const last = state.meteora.attemptedAt ?? 0;
-  const wait = state.meteora.error ? 30_000 : 180_000;
-  if (last && now - last < wait) return;
-  state.meteora.attemptedAt = now;
-  const result = await fetchMeteoraTop();
-  if (!result.ok) {
-    markMeteoraUnavailable(state, result.error, now);
-    return;
-  }
-  applyMeteoraRoster(state, result.wallets, {
-    vaultLabel: result.vaultLabel,
-    vaultAddress: result.vaultAddress,
-    refreshedAt: now,
-  });
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : "Error de red";
 }
 
-async function pollOneWallet(state: EngineState, now: number): Promise<void> {
-  const candidates = state.leaders.filter(
-    (leader) => leader.wallet && (leader.kind === "wallet" || (leader.kind === "meteora" && leader.enabled)),
-  );
-  if (candidates.length === 0) return;
-  const leader = candidates[state.rpcCursor % candidates.length];
-  state.rpcCursor += 1;
-  if (leader.lastPollAt && now - leader.lastPollAt < 25_000) return;
-  leader.lastPollAt = now;
+/**
+ * One pass over every market. Network calls happen outside the state lock;
+ * results are applied inside it, so the dashboard never waits on Binance.
+ */
+export async function tick(): Promise<void> {
+  if (g.__botTicking) return;
+  g.__botTicking = true;
   try {
-    const polled = await pollWalletSwaps(leader.wallet!, leader.seenSignatures, now);
-    leader.seenSignatures = polled.seen;
-    leader.rpcError = null;
-    for (const fill of polled.fills) {
-      fill.leaderId = leader.id;
-      applyFill(state, fill);
+    const plan = await withState((state) => {
+      const now = Date.now();
+      return state.books.map((book) => ({
+        id: book.id,
+        interval: state.settings.interval,
+        settings: state.settings,
+        validate: validationDue(state, book, now),
+        poll: !book.polledAt || now - book.polledAt >= POLL_MS,
+      }));
+    });
+
+    for (const item of plan) {
+      const market = marketById(item.id);
+      if (!market) continue;
+      if (item.validate) {
+        try {
+          const { candles } = await fetchCandles(market, item.interval, VALIDATION_BARS[item.interval]);
+          const validation = validateMarket(item.settings, candles, Date.now());
+          await withState((state) => {
+            const book = state.books.find((b) => b.id === item.id);
+            if (book && state.settings.interval === item.interval) applyValidation(state, book, validation, Date.now());
+          });
+        } catch (error) {
+          await withState((state) => {
+            const book = state.books.find((b) => b.id === item.id);
+            if (book) book.error = `Validación: ${message(error)}`;
+          });
+        }
+      }
+      if (item.poll) {
+        try {
+          const { candles } = await fetchCandles(market, item.interval, LIVE_BARS);
+          candleCache().set(`${item.id}:${item.interval}`, candles);
+          await withState((state) => {
+            const book = state.books.find((b) => b.id === item.id);
+            if (book && state.settings.interval === item.interval) onCandles(state, book, candles, Date.now());
+          });
+        } catch (error) {
+          await withState((state) => {
+            const book = state.books.find((b) => b.id === item.id);
+            if (book) {
+              book.error = message(error);
+              book.polledAt = Date.now();
+            }
+          });
+        }
+      }
     }
-  } catch (error) {
-    leader.rpcError =
-      error instanceof Error
-        ? error.message
-        : "El RPC no respondió. El modo demo sigue activo.";
+
+    await withState(async (state) => {
+      markAccount(state, Date.now());
+      await saveState(state);
+    });
+  } finally {
+    g.__botTicking = false;
   }
 }
 
-async function tick(state: EngineState): Promise<EngineState> {
-  const now = Date.now();
-  rollover(state, now);
-  if (now - state.updatedAt >= 2_500) {
-    stepDemo(state, now);
-  }
-  await refreshMeteora(state, now);
-  await pollOneWallet(state, now);
-  applyProtectiveStops(state, now);
-  await saveState(state);
-  return state;
+/** The bot trades from the server process, with or without a browser open. */
+export function startLoop(): void {
+  if (g.__botLoop) return;
+  console.log("Bot de estrategia en papel: ciclo cada 15 s.");
+  void tick().catch((error: unknown) => console.error("tick", error));
+  g.__botLoop = setInterval(() => {
+    void tick().catch((error: unknown) => console.error("tick", error));
+  }, 15_000);
 }
 
-async function persist(state: EngineState, replace = false) {
-  await saveState(state);
-  const saved = await writeEffectiveness(state, { replace });
-  return toView(state, saved);
+export function readBot(): Promise<BotView> {
+  startLoop();
+  return withState((state) => toView(state, candleCache()));
 }
 
-export function readDesk(): Promise<DeskView> {
-  return withState(async (state) => {
-    const next = await tick(state);
-    const saved = await writeEffectiveness(next);
-    return toView(next, saved);
-  });
-}
-
-export function runAction(body: {
+export type ActionBody = {
   type?: string;
   active?: boolean;
   id?: string;
-  enabled?: boolean;
-  wallet?: string;
-  settings?: Partial<RiskSettings>;
-}): Promise<{ ok: true; view: DeskView } | { ok: false; error: string; view: DeskView }> {
+  settings?: Partial<BotSettings>;
+};
+
+export function runAction(body: ActionBody): Promise<{ ok: true; view: BotView } | { ok: false; error: string; view: BotView }> {
   return withState(async (state) => {
     const now = Date.now();
     let error: string | null = null;
-    if (body.type === "kill") setKill(state, Boolean(body.active), now);
-    else if (body.type === "toggle") error = setLeaderEnabled(state, body.id ?? "", Boolean(body.enabled));
-    else if (body.type === "add-wallet") error = addWalletLeader(state, body.wallet ?? "", now);
-    else if (body.type === "remove") error = removeLeader(state, body.id ?? "", now);
-    else if (body.type === "settings") applySettings(state, clampSettings(body.settings));
+    if (body.type === "halt") setHalt(state, Boolean(body.active), now);
+    else if (body.type === "close") error = closeMarket(state, body.id ?? "", now);
+    else if (body.type === "settings") applySettings(state, clampBotSettings({ ...state.settings, ...body.settings }), now);
+    else if (body.type === "revalidate") for (const book of state.books) book.validation = null;
     else if (body.type === "reset") {
-      const { createSeededState } = await import("./engine/demo");
-      const fresh = createSeededState(now);
-      return { ok: true as const, view: await persist(fresh, true) };
+      const fresh = createBotState(now, state.settings);
+      g.__botState = fresh;
+      await saveState(fresh);
+      return { ok: true as const, view: toView(fresh, candleCache()) };
     } else error = "Acción desconocida.";
-    const view = await persist(state);
+    markAccount(state, now);
+    await saveState(state);
+    const view = toView(state, candleCache());
     return error ? { ok: false as const, error, view } : { ok: true as const, view };
   });
 }

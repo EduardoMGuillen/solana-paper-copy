@@ -16,8 +16,8 @@ const mono = Fira_Code({
 });
 
 export const metadata: Metadata = {
-  title: "Mesa de copia en papel",
-  description: "Copia en papel de líderes de Solana. No firma ni envía transacciones.",
+  title: "Bot de estrategia Solana",
+  description: "Bot de trading por análisis técnico con validación walk-forward. Papel, precios reales.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

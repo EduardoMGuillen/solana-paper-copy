@@ -1,49 +1,30 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createSeededState } from "./engine/demo";
-import type { EngineState } from "./engine/types";
+import { createBotState, type BotState } from "./bot/engine";
+import { clampBotSettings } from "./bot/settings";
 import { dataDir } from "./paths";
 
 function stateFile(): string {
-  return path.join(dataDir(), "paper-state.json");
+  return path.join(dataDir(), "bot-state.json");
 }
 
-export async function loadState(): Promise<EngineState> {
+export async function loadState(): Promise<BotState> {
   try {
-    const raw = await readFile(stateFile(), "utf8");
-    const parsed = JSON.parse(raw) as EngineState;
-    if (parsed.version !== 2 || !parsed.kill || !Array.isArray(parsed.leaders)) {
+    const parsed = JSON.parse(await readFile(stateFile(), "utf8")) as BotState;
+    if (parsed.version !== 3 || !Array.isArray(parsed.books) || !parsed.halt) {
       throw new Error("estado incompatible");
     }
-    parsed.series ??= {};
-    parsed.drawdownCurve ??= [];
-    parsed.meteora ??= {
-      status: "idle",
-      sourceName: "Meteora Stake2Earn",
-      ranksWhat: "",
-      windowLabel: "",
-      vaultLabel: null,
-      vaultAddress: null,
-      refreshedAt: null,
-      attemptedAt: null,
-      error: null,
-      wallets: [],
-    };
-    parsed.accountPeak ??= parsed.startingEquity;
-    parsed.rpcCursor ??= 0;
+    parsed.settings = clampBotSettings(parsed.settings);
     return parsed;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code && code !== "ENOENT") {
-      // A corrupt file is replaced so the desk can boot. The demo leaders come back.
-    }
-    const fresh = createSeededState(Date.now());
+  } catch {
+    // Missing or from the old copy desk: start a fresh paper account.
+    const fresh = createBotState(Date.now());
     await saveState(fresh);
     return fresh;
   }
 }
 
-export async function saveState(state: EngineState): Promise<void> {
+export async function saveState(state: BotState): Promise<void> {
   const file = stateFile();
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
