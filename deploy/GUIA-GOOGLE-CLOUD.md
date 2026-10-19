@@ -66,6 +66,33 @@ sudo bash install.sh                      # actualizar a la última versión de 
 - **Cambiar la contraseña**: edita `BOT_PASSWORD` con `sudo nano /etc/solana-bot.env` y luego `sudo systemctl restart solana-bot`.
 - **Si apagas y enciendes la VM**, la IP puede cambiar. Vuelve a ejecutar `sudo bash install.sh` para que el HTTPS use la nueva dirección.
 
+## Alertas por Telegram
+
+El bot te avisa por Telegram cuando:
+- compra o vende (con el resultado en US$ y en R);
+- se activa un corte por pérdida diaria o por drawdown, o pausas o reanudas el bot;
+- cambia la estrategia de un mercado;
+- un mercado pierde o recupera los datos de precios.
+
+Además envía un **resumen diario** a las 00:00 UTC.
+
+1. En Telegram, abre **@BotFather**, envía `/newbot` y sigue los pasos. Te da un **token** como `123456:ABC-...`.
+2. Abre tu bot nuevo y envíale cualquier mensaje, por ejemplo "hola".
+3. En la terminal SSH de la VM, obtén tu **chat id**:
+   ```bash
+   curl -s "https://api.telegram.org/bot<TU_TOKEN>/getUpdates" | grep -o '"chat":{"id":[-0-9]*'
+   ```
+4. Agrega las dos líneas al archivo de configuración y reinicia el servicio:
+   ```bash
+   sudo nano /etc/solana-bot.env
+   #   TELEGRAM_BOT_TOKEN=123456:ABC-...
+   #   TELEGRAM_CHAT_ID=987654321
+   sudo systemctl restart solana-bot
+   ```
+5. En el dashboard, en **Ajustes**, pulsa **Probar alerta de Telegram**.
+
+El token es secreto: quien lo tenga puede escribir como tu bot. Vive solo en `/etc/solana-bot.env`, con permisos de root.
+
 ## Investigación de pools de Meteora (estilo Decoder Farmer)
 
 El instalador deja un recolector que guarda cada 15 minutos una foto de los pools DLMM con SOL. No opera nada; solo registra datos.

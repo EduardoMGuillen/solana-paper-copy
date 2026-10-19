@@ -104,7 +104,13 @@ See [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). One command (`su
 
 The whole app (dashboard and API) is behind HTTP Basic auth when `BOT_PASSWORD` is set. Without it, the app answers on localhost only.
 
-## Going live (not implemented, on purpose)
+## Telegram alerts
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (on the VM: `/etc/solana-bot.env`). The bot then sends buys, sells, risk halts, strategy changes, data-feed outages and a daily summary, batched once per tick. Setup steps are in the deploy guide.
+
+## Going live (designed, not implemented)
+
+The full design is in [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md): an executor interface (paper → shadow → live), Jupiter Swap API v2, Meteora DLMM positions, key handling, hard limits outside the dashboard, reconciliation and staged rollout. Summary:
 
 Before risking money:
 

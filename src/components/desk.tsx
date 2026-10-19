@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Pause, Play, RefreshCw, RotateCcw } from "lucide-react";
+import { Pause, Play, RefreshCw, RotateCcw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -417,6 +417,16 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
                       Descartar cambios
                     </Button>
                   ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 cursor-pointer"
+                    disabled={busy === "telegram-test" || !view.telegram}
+                    title={view.telegram ? "Enviar un mensaje de prueba" : "Configura TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en el servidor"}
+                    onClick={() => void act("telegram-test", { type: "telegram-test" })}
+                  >
+                    <Send aria-hidden="true" /> {view.telegram ? "Probar alerta de Telegram" : "Telegram sin configurar"}
+                  </Button>
                   <Button type="button" variant="outline" className="min-h-11 cursor-pointer" disabled={busy === "revalidate"} onClick={() => void act("revalidate", { type: "revalidate" })}>
                     <RefreshCw aria-hidden="true" /> Revalidar estrategias
                   </Button>

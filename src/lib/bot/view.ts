@@ -1,6 +1,7 @@
 import { accountEquity, bookEquity, entriesAllowed, type BotState, type MarketBook } from "./engine";
 import type { Candle } from "./indicators";
 import { closedOnly, marketById } from "./market";
+import { telegramConfig } from "../notify/telegram";
 import { PROFILES, profileOf } from "./settings";
 import { computeIndicators, STRATEGIES, STRATEGY_IDS, type Indicators, type StrategyId } from "./strategies";
 
@@ -147,6 +148,7 @@ export function toView(state: BotState, candles: Map<string, Candle[]>) {
       "Cuenta en papel con precios reales. No firma ni envía transacciones. Resultados pasados no garantizan resultados futuros.",
     settings: state.settings,
     profile: profileOf(state.settings),
+    telegram: Boolean(telegramConfig()),
     profiles: Object.entries(PROFILES).map(([id, p]) => ({ id, name: p.name, summary: p.summary })),
     strategies: STRATEGY_IDS.map((id: StrategyId) => ({ id, name: STRATEGIES[id].name, summary: STRATEGIES[id].summary })),
     account: {

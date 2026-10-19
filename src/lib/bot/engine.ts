@@ -56,7 +56,15 @@ export type MarketBook = {
 
 export type BotTrade = ClosedTrade & { id: string; market: string; strategy: StrategyId | null };
 
-export type LogLine = { id: string; t: number; market: string | null; text: string; tone: "info" | "buy" | "sell" | "warn" };
+export type LogLine = {
+  id: string;
+  t: number;
+  market: string | null;
+  text: string;
+  tone: "info" | "buy" | "sell" | "warn";
+  /** Worth a push notification (Telegram). Buys, sells and warnings always are. */
+  alert?: boolean;
+};
 
 export type BotState = {
   version: 3;
@@ -73,6 +81,8 @@ export type BotState = {
   books: MarketBook[];
   trades: BotTrade[];
   log: LogLine[];
+  /** Highest log sequence already sent to Telegram. */
+  notifiedSeq?: number;
   equityCurve: { t: number; equity: number }[];
   peakEquity: number;
   halt: {
@@ -104,8 +114,15 @@ function nextId(state: BotState, prefix: string): string {
   return `${prefix}-${state.seq}`;
 }
 
-export function addLog(state: BotState, t: number, market: string | null, text: string, tone: LogLine["tone"] = "info"): void {
-  state.log.push({ id: nextId(state, "log"), t, market, text, tone });
+export function addLog(
+  state: BotState,
+  t: number,
+  market: string | null,
+  text: string,
+  tone: LogLine["tone"] = "info",
+  alert = tone !== "info",
+): void {
+  state.log.push({ id: nextId(state, "log"), t, market, text, tone, alert });
   if (state.log.length > LOG_CAP) state.log.splice(0, state.log.length - LOG_CAP);
 }
 
@@ -208,6 +225,7 @@ export function onCandles(state: BotState, book: MarketBook, candles: Candle[], 
     book.lastPriceT = now;
   }
   book.polledAt = now;
+  if (book.error) addLog(state, now, book.id, "Datos de mercado recuperados.", "info", true);
   book.error = null;
   if (closed.length === 0) return;
 
@@ -245,6 +263,17 @@ export function markAccount(state: BotState, now: number): void {
   const equity = accountEquity(state);
   const key = dayKey(now);
   if (state.halt.dayKey !== key) {
+    const dayPnl = equity - state.halt.dayStartEquity;
+    const closedToday = state.trades.filter((trade) => dayKey(trade.exitT) === state.halt.dayKey);
+    const sol = state.solPrice > 0 ? ` (${(equity / state.solPrice).toFixed(4)} SOL)` : "";
+    addLog(
+      state,
+      now,
+      null,
+      `Resumen ${state.halt.dayKey}: patrimonio ${equity.toFixed(2)} US$${sol}, día ${dayPnl >= 0 ? "+" : ""}${dayPnl.toFixed(2)} US$, ${closedToday.length} operaciones cerradas, ${state.books.filter((b) => b.sleeve.position).length} abiertas.`,
+      "info",
+      true,
+    );
     state.halt.dayKey = key;
     state.halt.dayStartEquity = equity;
     if (state.halt.daily) {
@@ -345,6 +374,7 @@ export function applyValidation(state: BotState, book: MarketBook, validation: V
       ? `Estrategia ${before ? `${STRATEGIES[before].name} → ` : ""}${STRATEGIES[validation.chosen].name} (pasó walk-forward).`
       : "Ninguna estrategia pasó la validación. Este mercado queda sin operar.",
     validation.chosen ? "info" : "warn",
+    true,
   );
 }
 
@@ -414,7 +444,7 @@ export function setHalt(state: BotState, active: boolean, now: number): void {
     state.peakEquity = accountEquity(state);
     state.halt.dayStartEquity = state.peakEquity;
   }
-  addLog(state, now, null, active ? "Pausa manual: sin entradas nuevas." : "Bot reanudado.", active ? "warn" : "info");
+  addLog(state, now, null, active ? "Pausa manual: sin entradas nuevas." : "Bot reanudado.", active ? "warn" : "info", true);
   markAccount(state, now);
 }
 

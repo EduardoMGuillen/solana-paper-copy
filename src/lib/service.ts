@@ -1,4 +1,5 @@
 import {
+  addLog,
   applySettings,
   applyValidation,
   closeMarket,
@@ -14,6 +15,7 @@ import type { Candle } from "./bot/indicators";
 import { fetchCandles, marketById, type Interval } from "./bot/market";
 import { clampBotSettings, PROFILES, type BotSettings, type ProfileId } from "./bot/settings";
 import { toView, type BotView } from "./bot/view";
+import { formatAlerts, logSeq, pendingAlerts, sendTelegram, telegramConfig } from "./notify/telegram";
 import { loadState, saveState } from "./store";
 
 const POLL_MS = 30_000;
@@ -52,7 +54,11 @@ async function freshState(settings: BotSettings = clampBotSettings(null)): Promi
 export function withState<T>(fn: (state: BotState) => Promise<T> | T): Promise<T> {
   const previous = g.__botQueue ?? Promise.resolve();
   const job = previous.then(async () => {
-    g.__botState ??= await loadState(() => freshState());
+    if (!g.__botState) {
+      g.__botState = await loadState(() => freshState());
+      // First run with alerts: start from now, do not replay the old log.
+      g.__botState.notifiedSeq ??= g.__botState.seq;
+    }
     return fn(g.__botState);
   });
   g.__botQueue = job.then(
@@ -64,6 +70,33 @@ export function withState<T>(fn: (state: BotState) => Promise<T> | T): Promise<T
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "Error de red";
+}
+
+/** Alert once when a market loses its data feed, not on every failed poll. */
+function setBookError(state: BotState, book: BotState["books"][number], error: string): void {
+  if (!book.error) addLog(state, Date.now(), book.id, `Sin datos de mercado: ${error}`, "warn");
+  book.error = error;
+}
+
+/** Send pending alert lines to Telegram. On failure they stay pending for the next tick. */
+async function notify(): Promise<void> {
+  const config = telegramConfig();
+  if (!config) return;
+  const batch = await withState((state) => {
+    const lines = pendingAlerts(state);
+    if (lines.length === 0) return null;
+    return { text: formatAlerts(lines, state), seq: Math.max(...lines.map(logSeq)) };
+  });
+  if (!batch) return;
+  try {
+    await sendTelegram(config, batch.text);
+    await withState(async (state) => {
+      state.notifiedSeq = Math.max(state.notifiedSeq ?? 0, batch.seq);
+      await saveState(state);
+    });
+  } catch (error) {
+    console.error("telegram", message(error));
+  }
 }
 
 /**
@@ -99,7 +132,7 @@ export async function tick(): Promise<void> {
         } catch (error) {
           await withState((state) => {
             const book = state.books.find((b) => b.id === item.id);
-            if (book) book.error = `Validación: ${message(error)}`;
+            if (book) setBookError(state, book, `Validación: ${message(error)}`);
           });
         }
       }
@@ -115,7 +148,7 @@ export async function tick(): Promise<void> {
           await withState((state) => {
             const book = state.books.find((b) => b.id === item.id);
             if (book) {
-              book.error = message(error);
+              setBookError(state, book, message(error));
               book.polledAt = Date.now();
             }
           });
@@ -130,6 +163,7 @@ export async function tick(): Promise<void> {
       markAccount(state, Date.now());
       await saveState(state);
     });
+    await notify();
   } finally {
     g.__botTicking = false;
   }
@@ -170,6 +204,17 @@ export function runAction(body: ActionBody): Promise<{ ok: true; view: BotView }
       else applySettings(state, clampBotSettings({ ...state.settings, ...profile.values }), now);
     }
     else if (body.type === "revalidate") for (const book of state.books) book.validation = null;
+    else if (body.type === "telegram-test") {
+      const config = telegramConfig();
+      if (!config) error = "Telegram no está configurado: falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID.";
+      else {
+        try {
+          await sendTelegram(config, "<b>🤖 Bot Solana</b>\n✅ Alertas funcionando. Te avisaré de compras, ventas, cortes de riesgo y un resumen diario.");
+        } catch (e) {
+          error = message(e);
+        }
+      }
+    }
     else if (body.type === "reset") {
       const fresh = createBotState(now, state.settings, state.solPrice);
       g.__botState = fresh;
