@@ -66,6 +66,23 @@ sudo bash install.sh                      # actualizar a la última versión de 
 - **Cambiar la contraseña**: edita `BOT_PASSWORD` con `sudo nano /etc/solana-bot.env` y luego `sudo systemctl restart solana-bot`.
 - **Si apagas y enciendes la VM**, la IP puede cambiar. Vuelve a ejecutar `sudo bash install.sh` para que el HTTPS use la nueva dirección.
 
+## Investigación de pools de Meteora (estilo Decoder Farmer)
+
+El instalador deja un recolector que guarda cada 15 minutos una foto de los pools DLMM con SOL. No opera nada; solo registra datos.
+
+```bash
+sudo meteora-lp scan     # pools actuales: comisiones/TVL y los mejores candidatos
+sudo meteora-lp report   # simulación en papel de posiciones Bid-Ask sobre las fotos guardadas
+systemctl list-timers solana-bot-meteora.timer   # cuándo corre la próxima foto
+```
+
+Corre `report` después de 3 a 7 días de fotos. Muestra:
+- **% de ganadoras** de las posiciones simuladas;
+- **resultado medio y peor caso** por posición;
+- **cada cuánto el token cayó más de 60%** con la posición abierta.
+
+Las comisiones del reporte son una estimación **optimista**: si aun así la media sale negativa, la estrategia pierde.
+
 ## Seguridad
 
 - **Contraseña:** todo el sitio (dashboard y API) pide usuario y contraseña, que es aleatoria de 28 caracteres.

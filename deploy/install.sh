@@ -110,9 +110,51 @@ ReadWritePaths=$DATA_DIR $APP_DIR/.next
 [Install]
 WantedBy=multi-user.target
 EOF
+# Meteora DLMM pool snapshots every 15 min, in its own short-lived process
+# with a memory cap so it can never take the trading bot down.
+cat > /etc/systemd/system/solana-bot-meteora.service <<EOF
+[Unit]
+Description=Meteora DLMM pool snapshot (paper research)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$ENV_FILE
+Environment=NODE_OPTIONS=--max-old-space-size=700
+ExecStart=$APP_DIR/node_modules/.bin/tsx scripts/meteora.ts collect
+TimeoutStartSec=300
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=$DATA_DIR
+EOF
+cat > /etc/systemd/system/solana-bot-meteora.timer <<EOF
+[Unit]
+Description=Meteora DLMM snapshot every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+# Shortcut: meteora-lp scan | report
+cat > /usr/local/bin/meteora-lp <<EOF
+#!/usr/bin/env bash
+set -a; source $ENV_FILE; set +a
+cd $APP_DIR && exec sudo -E -u $APP_USER $APP_DIR/node_modules/.bin/tsx scripts/meteora.ts "\${1:-report}"
+EOF
+chmod 755 /usr/local/bin/meteora-lp
+
 systemctl daemon-reload
 systemctl enable --quiet solana-bot
 systemctl restart solana-bot
+systemctl enable --quiet --now solana-bot-meteora.timer
 
 step "HTTPS con Caddy"
 if ! command -v caddy >/dev/null; then
