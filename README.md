@@ -65,6 +65,28 @@ Returns scale roughly with the risk setting. At 3% risk, SOL `cruce` returned +6
 - The returns are modest. Nothing here is a "passive income machine". Treat any strategy that promises more with suspicion.
 - Past results do not guarantee future results. Four years is only a few market cycles.
 
+## Profiles and the 1 SOL test
+
+The paper account starts with **1 SOL** (change it under settings; applies on reset), valued at the SOL price at creation. The dashboard reports equity in USD and in SOL, and against **just holding the starting SOL**. If the bot cannot beat that, it is not worth running.
+
+| Profile | Risk per trade | Halts | Portfolio backtest (Apr 2024 – Oct 2026) |
+|---|---|---|---|
+| Conservador | 2% | daily 5%, drawdown 20% | ~10%/yr, max drawdown ~5% |
+| **Agresivo** (default) | 5% | daily 8%, drawdown 30% | ~20%/yr, max drawdown ~7% |
+
+In the same window, buying and holding the same 5 tokens lost 45%. Expect live results around half the backtest return and up to twice its drawdown.
+
+## What was tested and rejected
+
+These ideas were backtested on real data with real costs and **did not survive**. They stay in the repo as research tools.
+
+| Idea | Result |
+|---|---|
+| VWAP + EMA 9 (and EMA 9/20) scalping on 3m / 15m | Loses on every market even at 0.03% cost per side (best case on Solana). The stop is ~0.2% away, so fees eat a third to half of the risk on every trade. `npm run backtest -- 3m 34000 0.01 vwap9 3 3` |
+| Momentum rotation across 21 Solana tokens (daily) | +75–83%/yr in 2022–2024 (meme boom), median **−67%** out of sample in 2025–2026 across 216 parameter sets. `npm run rotation` |
+| Long/short trend following with 2–5x leverage (perps) | Shorts and perp funding make it worse than spot long-only; BTC at 5x lost 24% with a 72% drawdown out of sample |
+| RSI(2) mean reversion | Profit factor < 1 on almost every market |
+
 ## Run
 
 ```bash

@@ -1,4 +1,4 @@
-import { adx, atr, ema, highest, lowest, rsi, sma, type Candle } from "./indicators";
+import { adx, atr, ema, highest, lowest, rsi, sessionBar, sma, vwap, type Candle } from "./indicators";
 
 /**
  * Long-only spot strategies. Each one decides on a CLOSED bar; the caller
@@ -14,15 +14,21 @@ import { adx, atr, ema, highest, lowest, rsi, sma, type Candle } from "./indicat
  * - regimen: hold while price is above its 200 SMA and the 50 EMA confirms
  *   (Faber's trend filter). Keeps most of the bull market, sidesteps most of
  *   the crashes.
+ * - vwap: intraday VWAP + EMA 9/20 pullback. Long only above the session
+ *   VWAP with the fast EMA over the slow one, entering when price reclaims
+ *   the EMA 9 after a dip. Flat at the end of each UTC session.
+ * - vwap9: the plain scalping version. Above the VWAP, buy the close back
+ *   over the EMA 9, sell the close back under it.
  */
 
-export type StrategyId = "cruce" | "regimen" | "tendencia" | "retroceso";
+export type StrategyId = "cruce" | "regimen" | "tendencia" | "retroceso" | "vwap" | "vwap9";
 
-export const STRATEGY_IDS: StrategyId[] = ["cruce", "regimen", "tendencia", "retroceso"];
+export const STRATEGY_IDS: StrategyId[] = ["cruce", "regimen", "tendencia", "retroceso", "vwap", "vwap9"];
 
 export type Indicators = {
   candles: Candle[];
   close: number[];
+  ema9: number[];
   ema20: number[];
   ema50: number[];
   ema200: number[];
@@ -34,6 +40,8 @@ export type Indicators = {
   adx14: number[];
   donHigh20: number[];
   donLow10: number[];
+  vwap: number[];
+  sessionBar: number[];
 };
 
 export function computeIndicators(candles: Candle[]): Indicators {
@@ -43,6 +51,7 @@ export function computeIndicators(candles: Candle[]): Indicators {
   return {
     candles,
     close,
+    ema9: ema(close, 9),
     ema20: ema(close, 20),
     ema50: ema(close, 50),
     ema200: ema(close, 200),
@@ -54,6 +63,8 @@ export function computeIndicators(candles: Candle[]): Indicators {
     adx14: adx(candles, 14),
     donHigh20: highest(highs, 20),
     donLow10: lowest(lows, 10),
+    vwap: vwap(candles),
+    sessionBar: sessionBar(candles),
   };
 }
 
@@ -178,7 +189,80 @@ const regimen: Strategy = {
   },
 };
 
-export const STRATEGIES: Record<StrategyId, Strategy> = { cruce, regimen, tendencia, retroceso };
+const DAY_MS = 86_400_000;
+
+function lastBarOfSession(ind: Indicators, i: number): boolean {
+  const candles = ind.candles;
+  const step = i > 0 ? candles[i].t - candles[i - 1].t : 0;
+  return step > 0 && Math.floor((candles[i].t + step) / DAY_MS) !== Math.floor(candles[i].t / DAY_MS);
+}
+
+const vwapStrategy: Strategy = {
+  id: "vwap",
+  name: "VWAP + EMA 9/20 (intradía)",
+  summary:
+    "Solo compra sobre el VWAP de la sesión con la EMA 9 sobre la EMA 20, cuando el precio recupera la EMA 9 tras un retroceso. Stop 1,5 ATR, objetivo 2 R, sale si cierra bajo el VWAP y cierra todo al final de la sesión UTC.",
+  warmup: 30,
+  entry(ind, i) {
+    const close = ind.close[i];
+    const a = ind.atr14[i];
+    if (!ok(close, a, ind.vwap[i], ind.ema9[i], ind.ema20[i], ind.ema9[i - 1])) return null;
+    // Skip the first 30 minutes of the session (VWAP still unstable) and its last bar.
+    const step = ind.candles[i].t - ind.candles[i - 1].t;
+    if (ind.sessionBar[i] * step < 30 * 60_000 || lastBarOfSession(ind, i)) return null;
+    if (!(close > ind.vwap[i] && ind.ema9[i] > ind.ema20[i])) return null;
+    const dipped = ind.close[i - 1] <= ind.ema9[i - 1];
+    if (!dipped || !(close > ind.ema9[i])) return null;
+    return { stop: close - 1.5 * a, note: "Recupera la EMA 9 sobre el VWAP" };
+  },
+  manage(ind, i, trade) {
+    const close = ind.close[i];
+    if (lastBarOfSession(ind, i)) return { exit: true, stop: trade.stop, note: "Fin de la sesión" };
+    if (Number.isFinite(ind.vwap[i]) && close < ind.vwap[i]) {
+      return { exit: true, stop: trade.stop, note: "Cierre bajo el VWAP" };
+    }
+    // Target 2R: the initial stop is 1.5 ATR away, so 2R is 3 ATR above the entry.
+    const a = ind.atr14[i];
+    if (Number.isFinite(a) && close >= trade.entryPrice + 3 * a) {
+      return { exit: true, stop: trade.stop, note: "Objetivo 2 R" };
+    }
+    return { exit: false, stop: trade.stop };
+  },
+};
+
+const vwap9: Strategy = {
+  id: "vwap9",
+  name: "VWAP + EMA 9 (scalping)",
+  summary:
+    "Sobre el VWAP de la sesión, compra cuando el cierre cruza sobre la EMA 9 y vende cuando cruza bajo ella. Stop 1,5 ATR. Cierra todo al final de la sesión UTC.",
+  warmup: 30,
+  entry(ind, i) {
+    const close = ind.close[i];
+    const a = ind.atr14[i];
+    if (!ok(close, a, ind.vwap[i], ind.ema9[i], ind.ema9[i - 1])) return null;
+    const step = ind.candles[i].t - ind.candles[i - 1].t;
+    if (ind.sessionBar[i] * step < 30 * 60_000 || lastBarOfSession(ind, i)) return null;
+    if (!(close > ind.vwap[i])) return null;
+    if (!(ind.close[i - 1] <= ind.ema9[i - 1] && close > ind.ema9[i])) return null;
+    return { stop: close - 1.5 * a, note: "Cruce sobre la EMA 9 encima del VWAP" };
+  },
+  manage(ind, i, trade) {
+    if (lastBarOfSession(ind, i)) return { exit: true, stop: trade.stop, note: "Fin de la sesión" };
+    if (Number.isFinite(ind.ema9[i]) && ind.close[i] < ind.ema9[i]) {
+      return { exit: true, stop: trade.stop, note: "Cierre bajo la EMA 9" };
+    }
+    return { exit: false, stop: trade.stop };
+  },
+};
+
+export const STRATEGIES: Record<StrategyId, Strategy> = {
+  cruce,
+  regimen,
+  tendencia,
+  retroceso,
+  vwap: vwapStrategy,
+  vwap9,
+};
 
 export function isStrategyId(value: unknown): value is StrategyId {
   return typeof value === "string" && (STRATEGY_IDS as string[]).includes(value);

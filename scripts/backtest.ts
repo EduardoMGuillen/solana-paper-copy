@@ -2,6 +2,7 @@
  * Backtest every strategy on every market with real public data.
  *   npm run backtest                 # 4h, 3000 bars
  *   npm run backtest -- 1d 1500      # interval and bar count
+ *   npm run backtest -- 3m 30000 0.01 vwap 3 3   # + risk, strategies, fee bps, slippage bps
  */
 import { walkForward } from "../src/lib/bot/backtest";
 import { fetchCandles, MARKETS, type Interval } from "../src/lib/bot/market";
@@ -12,11 +13,13 @@ const interval = (process.argv[2] as Interval) || "4h";
 const bars = Number(process.argv[3]) || 3000;
 const risk = Number(process.argv[4]) || defaultBotSettings.riskPerTrade;
 const only = process.argv[5]?.split(",");
+const feeBps = process.argv[6] !== undefined ? Number(process.argv[6]) : defaultBotSettings.feeBps;
+const slippageBps = process.argv[7] !== undefined ? Number(process.argv[7]) : defaultBotSettings.slippageBps;
 const pct = (v: number | null) => (v === null ? "   —  " : `${(v * 100).toFixed(1).padStart(6)}%`);
 const num = (v: number | null) => (v === null ? "  —  " : !Number.isFinite(v) ? "  ∞  " : v.toFixed(2).padStart(5));
 
 async function main() {
-  const s = { ...defaultBotSettings, riskPerTrade: risk };
+  const s = { ...defaultBotSettings, riskPerTrade: risk, feeBps, slippageBps };
   console.log(`interval=${interval} bars=${bars} risk=${s.riskPerTrade} fee=${s.feeBps}bps slip=${s.slippageBps}bps`);
   console.log("market strategy    trades  win    PF   expR  ret      OOSret   maxDD   B&H     sharpe verdict");
   for (const market of MARKETS) {

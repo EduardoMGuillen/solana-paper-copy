@@ -53,6 +53,12 @@ describe("live engine", () => {
     });
   }
 
+  it("values a 1 SOL account at the SOL price and splits it across markets", () => {
+    const state = createBotState(0, { ...defaultBotSettings, startingSol: 1, markets: ["SOL", "BTC"] }, 150);
+    expect(state.startingEquity).toBe(150);
+    expect(state.books.map((b) => b.sleeve.cash)).toEqual([75, 75]);
+  });
+
   it("does not replay history on first contact", () => {
     const candles = synthetic(800);
     const state = createBotState(0, { ...defaultBotSettings, markets: ["SOL"], strategy: "cruce" });

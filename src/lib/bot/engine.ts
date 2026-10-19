@@ -64,6 +64,11 @@ export type BotState = {
   createdAt: number;
   updatedAt: number;
   startingEquity: number;
+  /** Paper capital expressed in SOL, valued at the SOL price at creation. */
+  startingSol: number;
+  solPriceAtStart: number;
+  /** Latest SOL price, to report the account in SOL and against holding SOL. */
+  solPrice: number;
   settings: BotSettings;
   books: MarketBook[];
   trades: BotTrade[];
@@ -121,23 +126,37 @@ function fixedStrategy(settings: BotSettings): StrategyId | null {
   return settings.strategy === "auto" ? null : settings.strategy;
 }
 
-export function createBotState(now: number, settings: BotSettings = defaultBotSettings): BotState {
-  const slice = STARTING_USD / settings.markets.length;
+/**
+ * New paper account worth `settings.startingSol` SOL at `solPrice`.
+ * Without a SOL price it falls back to STARTING_USD.
+ */
+export function createBotState(now: number, settings: BotSettings = defaultBotSettings, solPrice: number | null = null): BotState {
+  const price = solPrice && solPrice > 0 ? solPrice : STARTING_USD / settings.startingSol;
+  const capital = settings.startingSol * price;
+  const slice = capital / settings.markets.length;
   const state: BotState = {
     version: 3,
     seq: 1,
     createdAt: now,
     updatedAt: now,
-    startingEquity: STARTING_USD,
+    startingEquity: capital,
+    startingSol: settings.startingSol,
+    solPriceAtStart: price,
+    solPrice: price,
     settings,
     books: settings.markets.map((id) => newBook(id, slice, fixedStrategy(settings))),
     trades: [],
     log: [],
-    equityCurve: [{ t: now, equity: STARTING_USD }],
-    peakEquity: STARTING_USD,
-    halt: { manual: false, daily: false, drawdown: false, reason: null, dayKey: dayKey(now), dayStartEquity: STARTING_USD },
+    equityCurve: [{ t: now, equity: capital }],
+    peakEquity: capital,
+    halt: { manual: false, daily: false, drawdown: false, reason: null, dayKey: dayKey(now), dayStartEquity: capital },
   };
-  addLog(state, now, null, `Cuenta de papel creada con ${STARTING_USD} US$ repartidos en ${settings.markets.length} mercados.`);
+  addLog(
+    state,
+    now,
+    null,
+    `Cuenta de papel creada con ${settings.startingSol} SOL (${capital.toFixed(2)} US$ a ${price.toFixed(2)} US$/SOL), repartidos en ${settings.markets.length} mercados.`,
+  );
   return state;
 }
 
@@ -271,8 +290,10 @@ function downsample<T>(items: T[], max: number): T[] {
 /** Walk-forward every strategy on this market's history and pick one. */
 export function validateMarket(settings: BotSettings, candles: Candle[], now: number): Validation {
   const options = { capital: 1_000, costs: costsOf(settings), sizing: sizingOf(settings) };
+  // A riskier profile is allowed a deeper drawdown, but never past 40%.
+  const maxDrawdown = Math.min(0.4, Math.max(0.25, settings.riskPerTrade * 8));
   const checks: StrategyCheck[] = STRATEGY_IDS.map((id) => {
-    const wf = walkForward(candles, id, options);
+    const wf = walkForward(candles, id, options, 0.7, maxDrawdown);
     const m = wf.full.metrics;
     const start = wf.full.equity[0]?.equity ?? 1;
     return {

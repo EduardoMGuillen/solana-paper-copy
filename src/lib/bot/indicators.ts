@@ -133,6 +133,45 @@ export function lowest(values: number[], period: number): number[] {
   });
 }
 
+/**
+ * Session VWAP, reset at 00:00 UTC (crypto has no exchange session).
+ * Uses the typical price (h + l + c) / 3 weighted by volume.
+ */
+export function vwap(candles: Candle[]): number[] {
+  const out = new Array<number>(candles.length).fill(Number.NaN);
+  let day = -1;
+  let pv = 0;
+  let vol = 0;
+  for (let i = 0; i < candles.length; i += 1) {
+    const bar = candles[i];
+    const d = Math.floor(bar.t / 86_400_000);
+    if (d !== day) {
+      day = d;
+      pv = 0;
+      vol = 0;
+    }
+    const typical = (bar.h + bar.l + bar.c) / 3;
+    pv += typical * bar.v;
+    vol += bar.v;
+    out[i] = vol > 0 ? pv / vol : typical;
+  }
+  return out;
+}
+
+/** Bars since the current UTC session opened (0 on the first bar of the day). */
+export function sessionBar(candles: Candle[]): number[] {
+  let day = -1;
+  let n = 0;
+  return candles.map((bar) => {
+    const d = Math.floor(bar.t / 86_400_000);
+    if (d !== day) {
+      day = d;
+      n = 0;
+    } else n += 1;
+    return n;
+  });
+}
+
 export function macd(
   closes: number[],
   fast = 12,

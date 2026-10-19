@@ -46,6 +46,11 @@ function pct(value: number | null, signed = false): string {
   return signed && value > 0 ? `+${body}` : body;
 }
 
+function sol(value: number | null): string {
+  if (value === null) return "—";
+  return `${value.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} SOL`;
+}
+
 function price(value: number | null): string {
   if (value === null) return "—";
   return value >= 1 ? value.toLocaleString("es-ES", { maximumFractionDigits: 4 }) : value.toPrecision(4);
@@ -145,8 +150,8 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-5">
             <Tape label="Patrimonio" value={account ? money(account.equity) : "—"} />
-            <Tape label="Retorno" value={account ? pct(account.totalReturn, true) : "—"} className={account ? tone(account.totalReturn) : ""} />
-            <Tape label="Realizado" value={account ? money(account.realized, true) : "—"} className={account ? tone(account.realized) : ""} />
+            <Tape label="En SOL" value={account ? sol(account.equitySol) : "—"} className={account && account.equitySol !== null ? tone(account.equitySol - account.startingSol) : ""} />
+            <Tape label="Retorno US$" value={account ? pct(account.totalReturn, true) : "—"} className={account ? tone(account.totalReturn) : ""} />
             <Tape label="Hoy" value={account ? money(account.dayPnl, true) : "—"} className={account ? tone(account.dayPnl) : ""} />
             <Tape label="Abiertas" value={account ? String(account.open) : "—"} />
           </div>
@@ -177,12 +182,31 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Rendimiento sobre {money(account.startingEquity)}</CardTitle>
+              <CardTitle>
+                Prueba con {account.startingSol} SOL · perfil {view.profiles.find((p) => p.id === view.profile)?.name ?? "personalizado"}
+              </CardTitle>
               <CardDescription>
-                Cada operación paga comisión y deslizamiento. El tamaño se calcula por riesgo: si salta el stop inicial, se pierde el {pct(view.settings.riskPerTrade)} del capital de ese mercado.
+                Empezó con {sol(account.startingSol)} = {money(account.startingEquity)} (SOL a {money(account.solPriceAtStart)}). Cada operación paga comisión y deslizamiento. Si salta el stop inicial se pierde el {pct(view.settings.riskPerTrade)} del capital de ese mercado.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              <div className="grid gap-3 rounded-lg border border-border bg-background/50 p-3 text-sm sm:grid-cols-3">
+                <div>
+                  <p className="text-muted-foreground">Bot</p>
+                  <p className="num text-lg">{money(account.equity)} · {sol(account.equitySol)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Si solo hubieras mantenido {account.startingSol} SOL</p>
+                  <p className="num text-lg">{money(account.holdValue)} · {sol(account.startingSol)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Diferencia del bot</p>
+                  <p className={`num text-lg ${tone(account.equity - account.holdValue)}`}>
+                    {money(account.equity - account.holdValue, true)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Positivo = el bot le gana a no hacer nada.</p>
+                </div>
+              </div>
               <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
                 <Stat k="Patrimonio" v={money(account.equity)} />
                 <Stat k="Retorno" v={pct(account.totalReturn, true)} />
@@ -294,14 +318,34 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
                   void act("settings", { type: "settings", settings });
                 }}
               >
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="mb-1 text-sm font-medium">Perfil de riesgo</legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {view.profiles.map((profile) => (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        disabled={busy === "profile"}
+                        onClick={() => void act("profile", { type: "profile", id: profile.id })}
+                        className={`min-h-11 cursor-pointer rounded-lg border px-3 py-2 text-left text-sm ${view.profile === profile.id ? "border-primary bg-primary/10" : "border-border"}`}
+                        aria-pressed={view.profile === profile.id}
+                      >
+                        <span className="font-medium">{profile.name}</span>
+                        <span className="block text-xs text-muted-foreground">{profile.summary}</span>
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
                 <p className="text-sm text-muted-foreground">
-                  Cambiar mercados, velas o estrategia cierra las posiciones al último precio y reparte el capital de nuevo. Cambiar solo el riesgo no toca las posiciones.
+                  Cambiar mercados, velas o estrategia cierra las posiciones al último precio y reparte el capital de nuevo. Cambiar solo el riesgo no toca las posiciones. El capital inicial en SOL se aplica al reiniciar la cuenta.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <SelectField
                     label="Velas"
                     value={settings.interval}
                     options={[
+                      { value: "3m", label: "3 minutos (scalping)" },
+                      { value: "15m", label: "15 minutos" },
                       { value: "1h", label: "1 hora" },
                       { value: "4h", label: "4 horas (recomendado)" },
                       { value: "1d", label: "1 día" },
@@ -347,6 +391,7 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
                   </div>
                 </fieldset>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <Field label="Capital inicial (al reiniciar)" suffix="SOL" value={settings.startingSol} onChange={(value) => edit("startingSol", value)} />
                   <Field label="Riesgo por operación" suffix="%" value={settings.riskPerTrade * 100} onChange={(value) => edit("riskPerTrade", value / 100)} />
                   <Field label="Exposición máxima por mercado" suffix="%" value={settings.maxExposure * 100} onChange={(value) => edit("maxExposure", value / 100)} />
                   <Field label="Corte por drawdown de la cuenta" suffix="%" value={settings.maxDrawdownHalt * 100} onChange={(value) => edit("maxDrawdownHalt", value / 100)} />

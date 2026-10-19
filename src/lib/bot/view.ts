@@ -1,6 +1,7 @@
 import { accountEquity, bookEquity, entriesAllowed, type BotState, type MarketBook } from "./engine";
 import type { Candle } from "./indicators";
 import { closedOnly, marketById } from "./market";
+import { PROFILES, profileOf } from "./settings";
 import { computeIndicators, STRATEGIES, STRATEGY_IDS, type Indicators, type StrategyId } from "./strategies";
 
 const CHART_BARS = 120;
@@ -137,11 +138,19 @@ export function toView(state: BotState, candles: Map<string, Candle[]>) {
     disclaimer:
       "Cuenta en papel con precios reales. No firma ni envía transacciones. Resultados pasados no garantizan resultados futuros.",
     settings: state.settings,
+    profile: profileOf(state.settings),
+    profiles: Object.entries(PROFILES).map(([id, p]) => ({ id, name: p.name, summary: p.summary })),
     strategies: STRATEGY_IDS.map((id: StrategyId) => ({ id, name: STRATEGIES[id].name, summary: STRATEGIES[id].summary })),
     account: {
       equity,
       startingEquity: state.startingEquity,
       totalReturn: equity / state.startingEquity - 1,
+      startingSol: state.startingSol,
+      solPrice: state.solPrice,
+      solPriceAtStart: state.solPriceAtStart,
+      equitySol: state.solPrice > 0 ? equity / state.solPrice : null,
+      /** Value today of just holding the starting SOL. */
+      holdValue: state.startingSol * state.solPrice,
       realized: trades.reduce((sum, trade) => sum + trade.pnl, 0),
       open: state.books.filter((book) => book.sleeve.position).length,
       dayPnl: equity - state.halt.dayStartEquity,

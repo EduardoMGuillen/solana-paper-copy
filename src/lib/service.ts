@@ -12,13 +12,14 @@ import {
 } from "./bot/engine";
 import type { Candle } from "./bot/indicators";
 import { fetchCandles, marketById, type Interval } from "./bot/market";
-import { clampBotSettings, type BotSettings } from "./bot/settings";
+import { clampBotSettings, PROFILES, type BotSettings, type ProfileId } from "./bot/settings";
 import { toView, type BotView } from "./bot/view";
 import { loadState, saveState } from "./store";
 
 const POLL_MS = 30_000;
 const LIVE_BARS = 600;
-const VALIDATION_BARS: Record<Interval, number> = { "1h": 8_000, "4h": 6_000, "1d": 2_000 };
+// Intraday frames need many more bars to cover a meaningful span (3m: ~70 days).
+const VALIDATION_BARS: Record<Interval, number> = { "3m": 34_000, "15m": 20_000, "1h": 8_000, "4h": 6_000, "1d": 2_000 };
 
 const g = globalThis as unknown as {
   __botQueue?: Promise<unknown>;
@@ -34,11 +35,24 @@ function candleCache(): Map<string, Candle[]> {
   return g.__botCandles;
 }
 
+async function solPriceNow(): Promise<number | null> {
+  try {
+    const { candles } = await fetchCandles(marketById("SOL")!, "1h", 2);
+    return candles.at(-1)?.c ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function freshState(settings: BotSettings = clampBotSettings(null)): Promise<BotState> {
+  return createBotState(Date.now(), settings, await solPriceNow());
+}
+
 /** Serialize every read-modify-write of the state. */
 export function withState<T>(fn: (state: BotState) => Promise<T> | T): Promise<T> {
   const previous = g.__botQueue ?? Promise.resolve();
   const job = previous.then(async () => {
-    g.__botState ??= await loadState();
+    g.__botState ??= await loadState(() => freshState());
     return fn(g.__botState);
   });
   g.__botQueue = job.then(
@@ -109,7 +123,10 @@ export async function tick(): Promise<void> {
       }
     }
 
+    const sol = await withState((state) => state.books.find((b) => b.id === "SOL")?.lastPrice ?? null);
+    const solPrice = sol ?? (await solPriceNow());
     await withState(async (state) => {
+      if (solPrice) state.solPrice = solPrice;
       markAccount(state, Date.now());
       await saveState(state);
     });
@@ -147,9 +164,14 @@ export function runAction(body: ActionBody): Promise<{ ok: true; view: BotView }
     if (body.type === "halt") setHalt(state, Boolean(body.active), now);
     else if (body.type === "close") error = closeMarket(state, body.id ?? "", now);
     else if (body.type === "settings") applySettings(state, clampBotSettings({ ...state.settings, ...body.settings }), now);
+    else if (body.type === "profile") {
+      const profile = PROFILES[body.id as ProfileId];
+      if (!profile) error = "Perfil desconocido.";
+      else applySettings(state, clampBotSettings({ ...state.settings, ...profile.values }), now);
+    }
     else if (body.type === "revalidate") for (const book of state.books) book.validation = null;
     else if (body.type === "reset") {
-      const fresh = createBotState(now, state.settings);
+      const fresh = createBotState(now, state.settings, state.solPrice);
       g.__botState = fresh;
       await saveState(fresh);
       return { ok: true as const, view: toView(fresh, candleCache()) };

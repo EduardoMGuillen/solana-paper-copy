@@ -6,9 +6,17 @@ import type { Candle } from "./indicators";
  * fallback for SOL, BTC and ETH.
  */
 
-export type Interval = "1h" | "4h" | "1d";
+export type Interval = "3m" | "15m" | "1h" | "4h" | "1d";
+
+export const INTERVALS: Interval[] = ["3m", "15m", "1h", "4h", "1d"];
+
+export function isInterval(value: unknown): value is Interval {
+  return typeof value === "string" && (INTERVALS as string[]).includes(value);
+}
 
 export const INTERVAL_MS: Record<Interval, number> = {
+  "3m": 3 * 60_000,
+  "15m": 15 * 60_000,
   "1h": 3_600_000,
   "4h": 4 * 3_600_000,
   "1d": 24 * 3_600_000,
@@ -114,7 +122,8 @@ export async function fetchCandles(market: Market, interval: Interval, bars: num
   try {
     return { candles: await binanceCandles(market.binance, interval, bars), source: "Binance" };
   } catch (error) {
-    if (!market.coinbase) throw error;
+    // Coinbase has no 3m bars here; intraday frames depend on Binance.
+    if (!market.coinbase || interval === "3m" || interval === "15m") throw error;
     return { candles: await coinbaseCandles(market.coinbase, interval, bars), source: "Coinbase" };
   }
 }

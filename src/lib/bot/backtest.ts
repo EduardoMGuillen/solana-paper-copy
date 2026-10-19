@@ -147,21 +147,27 @@ export type WalkForward = {
  * The parameters were chosen up front, so the OOS block is an honest
  * estimate of what the strategy does on data it was never fitted to.
  */
-export function walkForward(candles: Candle[], strategyId: StrategyId, options: BacktestOptions, split = 0.7): WalkForward {
+export function walkForward(
+  candles: Candle[],
+  strategyId: StrategyId,
+  options: BacktestOptions,
+  split = 0.7,
+  maxDrawdown = 0.25,
+): WalkForward {
   const warmup = STRATEGIES[strategyId].warmup;
   const cut = Math.max(warmup + 50, Math.floor(warmup + (candles.length - warmup) * split));
   const full = runBacktest(candles, strategyId, options);
   const inSample = runBacktest(candles, strategyId, { ...options, tradeTo: cut - 1 }).metrics;
   const outOfSample = runBacktest(candles, strategyId, { ...options, tradeFrom: cut }).metrics;
-  return { strategy: strategyId, full, inSample, outOfSample, verdict: judge(full.metrics, outOfSample) };
+  return { strategy: strategyId, full, inSample, outOfSample, verdict: judge(full.metrics, outOfSample, maxDrawdown) };
 }
 
-export function judge(full: Metrics, oos: Metrics): { pass: boolean; reasons: string[] } {
+export function judge(full: Metrics, oos: Metrics, maxDrawdown = 0.25): { pass: boolean; reasons: string[] } {
   const reasons: string[] = [];
   if (full.trades < 20) reasons.push(`Solo ${full.trades} operaciones: muestra pequeña`);
   if (!(full.profitFactor !== null && full.profitFactor >= 1.2)) reasons.push("Factor de beneficio < 1,2");
   if (!(oos.totalReturn > 0)) reasons.push("Pierde fuera de muestra");
-  if (full.maxDrawdown > 0.25) reasons.push("Drawdown máximo > 25%");
+  if (full.maxDrawdown > maxDrawdown) reasons.push(`Drawdown máximo > ${(maxDrawdown * 100).toFixed(0)}%`);
   if (!(full.expectancyR !== null && full.expectancyR > 0.1)) reasons.push("Expectativa < 0,1 R por operación");
   return { pass: reasons.length === 0, reasons };
 }
