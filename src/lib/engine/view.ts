@@ -1,6 +1,16 @@
-import { copyPnl, markEquity } from "./engine";
+import type { EffectivenessDataset } from "../effectiveness";
+import { copyPnl } from "./engine";
 import { drawdownPct, exitProceeds, profitFactor, winRate } from "./money";
 import { REASON_LABEL, TRADE_LABEL, type EngineState, type Leader } from "./types";
+
+function usd(value: number): string {
+  return value.toLocaleString("es-ES", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 export type DeskView = ReturnType<typeof toView>;
 
@@ -22,16 +32,18 @@ function trend(first: number, last: number): string {
   return "Casi plana.";
 }
 
-export function toView(state: EngineState) {
-  const equity = markEquity(state);
+export function toView(state: EngineState, saved: EffectivenessDataset) {
+  const equity = saved.equity;
   const realized = state.trades.reduce((sum, trade) => sum + (trade.pnlSol ?? 0), 0);
   const unrealizedPnl = state.leaders.reduce(
     (sum, leader) => sum + copyPnl(state, leader.id).unrealized,
     0,
   );
-  const firstEquity = state.equityCurve[0]?.equity ?? state.startingEquity;
-  const lastEquity = state.equityCurve[state.equityCurve.length - 1]?.equity ?? equity;
-  const maxDrawdown = state.drawdownCurve.reduce((max, point) => Math.max(max, point.drawdown), 0);
+  const curve = saved.equityCurve.length > 0 ? saved.equityCurve : state.equityCurve;
+  const drawdown = saved.drawdownCurve.length > 0 ? saved.drawdownCurve : state.drawdownCurve;
+  const firstEquity = curve[0]?.equity ?? saved.startingEquity;
+  const lastEquity = curve[curve.length - 1]?.equity ?? equity;
+  const maxDrawdown = saved.maxDrawdown;
 
   const leaders = state.leaders.map((leader) => {
     const pnl = copyPnl(state, leader.id);
@@ -66,13 +78,28 @@ export function toView(state: EngineState) {
     account: {
       equity,
       cash: state.cashSol,
-      startingEquity: state.startingEquity,
+      startingEquity: saved.startingEquity,
       realized,
       unrealized: unrealizedPnl,
       dayPnl: state.kill.realizedToday,
       maxDrawdown,
-      equitySummary: `Patrimonio de ${firstEquity.toFixed(3)} a ${lastEquity.toFixed(3)} SOL en ${state.equityCurve.length} puntos. ${trend(firstEquity, lastEquity)}`,
-      drawdownSummary: `Drawdown máximo de la cuenta ${(maxDrawdown * 100).toFixed(1)}%. El gráfico usa la curva de patrimonio en papel.`,
+      equitySummary: `Patrimonio de ${usd(firstEquity)} a ${usd(lastEquity)} en ${curve.length} puntos guardados. ${trend(firstEquity, lastEquity)}`,
+      drawdownSummary: `Drawdown máximo de la cuenta ${(maxDrawdown * 100).toFixed(1)}% sobre los ${usd(saved.startingEquity)} iniciales.`,
+    },
+    effectiveness: {
+      startingEquity: saved.startingEquity,
+      equity: saved.equity,
+      totalReturn: saved.totalReturn,
+      winRate: saved.winRate,
+      profitFactor: saved.profitFactor,
+      profitFactorUnbounded: saved.profitFactorUnbounded,
+      maxDrawdown: saved.maxDrawdown,
+      closed: saved.closed,
+      tradeCount: saved.trades.length,
+      currency: saved.currency,
+      path: saved.path,
+      updatedAt: saved.updatedAt,
+      session: saved.sessions[saved.sessions.length - 1] ?? null,
     },
     kill: {
       active: state.kill.manual || state.kill.auto,
@@ -84,8 +111,8 @@ export function toView(state: EngineState) {
     settings: state.settings,
     meteora: state.meteora,
     leaders,
-    equityCurve: state.equityCurve.slice(-160),
-    drawdownCurve: state.drawdownCurve.slice(-160),
+    equityCurve: curve.slice(-160),
+    drawdownCurve: drawdown.slice(-160),
     positions: state.positions.map((position) => {
       const mark = state.prices[position.mint] ?? position.entryPrice;
       const leader = state.leaders.find((item) => item.id === position.leaderId);
@@ -109,10 +136,14 @@ export function toView(state: EngineState) {
         openedAt: position.openedAt,
       };
     }),
-    trades: [...state.trades].reverse().slice(0, 30).map((trade) => ({
-      ...trade,
+    trades: [...saved.trades].reverse().slice(0, 30).map((trade) => ({
+      id: trade.id,
+      ts: trade.timestamps.ts,
+      symbol: trade.symbol,
       reasonLabel: TRADE_LABEL[trade.reason],
-      leaderName: state.leaders.find((leader) => leader.id === trade.leaderId)?.name ?? trade.leaderId,
+      leaderName: trade.leader,
+      feeSol: trade.fees,
+      pnlSol: trade.pnl,
     })),
     skips: [...state.skips].reverse().slice(0, 8).map((skip) => ({
       ...skip,

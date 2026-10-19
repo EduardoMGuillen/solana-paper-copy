@@ -21,17 +21,15 @@ import { LineChart, Sparkline } from "@/components/charts";
 import type { DeskView } from "@/lib/engine/view";
 import type { RiskSettings } from "@/lib/engine/types";
 
-function sol(value: number): string {
-  const sign = value > 0 ? "+" : "";
+function money(value: number, signed = false): string {
   const body = value.toLocaleString("es-ES", {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
-  return `${value < 0 ? "" : sign}${body} SOL`;
-}
-
-function solPlain(value: number): string {
-  return `${value.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} SOL`;
+  if (signed && value > 0) return `+${body}`;
+  return body;
 }
 
 function factor(value: number | null): string {
@@ -155,10 +153,10 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
             <p className="max-w-xl text-sm text-muted-foreground">{view?.disclaimer ?? "Los resultados en papel no son beneficios reales."}</p>
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
-            <Tape label="Patrimonio" value={view ? solPlain(view.account.equity) : "—"} />
-            <Tape label="Realizado" value={view ? sol(view.account.realized) : "—"} className={view ? tone(view.account.realized) : ""} />
-            <Tape label="No realizado" value={view ? sol(view.account.unrealized) : "—"} className={view ? tone(view.account.unrealized) : ""} />
-            <Tape label="Hoy" value={view ? sol(view.account.dayPnl) : "—"} className={view ? tone(view.account.dayPnl) : ""} />
+            <Tape label="Patrimonio" value={view ? money(view.account.equity) : "—"} />
+            <Tape label="Realizado" value={view ? money(view.account.realized, true) : "—"} className={view ? tone(view.account.realized) : ""} />
+            <Tape label="No realizado" value={view ? money(view.account.unrealized, true) : "—"} className={view ? tone(view.account.unrealized) : ""} />
+            <Tape label="Hoy" value={view ? money(view.account.dayPnl, true) : "—"} className={view ? tone(view.account.dayPnl) : ""} />
           </div>
           <Button
             type="button"
@@ -176,7 +174,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
           {view?.kill.reason
             ? view.kill.reason
             : view
-              ? `Pérdida realizada hoy ${sol(view.kill.realizedToday)} · límite −${solPlain(view.kill.limit)}`
+              ? `Pérdida realizada hoy ${money(view.kill.realizedToday, true)} · límite −${money(view.kill.limit)}`
               : "Cargando la mesa…"}
         </p>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -184,6 +182,32 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
 
       {!view ? <Skeleton /> : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Efectividad sobre los 100 US$</CardTitle>
+              <CardDescription>
+                La cuenta empieza en 100 US$. Solo abre y gestiona copias mientras este proceso está en marcha. No hay un operador en segundo plano. Al parar la mesa se cierran todas las posiciones al último precio, con comisión y deslizamiento, y después se escribe el dataset.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <Stat k="Inicio" v={money(view.effectiveness.startingEquity)} />
+                <Stat k="Retorno" v={pct(view.effectiveness.totalReturn)} />
+                <Stat k="Acierto" v={pct(view.effectiveness.winRate)} />
+                <Stat k="Factor" v={view.effectiveness.profitFactorUnbounded ? "∞" : factor(view.effectiveness.profitFactor)} />
+                <Stat k="Drawdown" v={pct(view.effectiveness.maxDrawdown)} />
+                <Stat k="Cierres" v={String(view.effectiveness.closed)} />
+              </dl>
+              <p className="text-sm text-muted-foreground">
+                {view.effectiveness.session
+                  ? view.effectiveness.session.stop
+                    ? `Sesión ${clock(view.effectiveness.session.start)} – ${clock(view.effectiveness.session.stop)} UTC.`
+                    : `Sesión iniciada a las ${clock(view.effectiveness.session.start)} UTC. Sigue abierta.`
+                  : "Todavía no hay una sesión guardada."}
+                {" "}Dataset en {view.effectiveness.path}. {view.effectiveness.tradeCount} operaciones.
+              </p>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle>Top 7 de Meteora</CardTitle>
@@ -217,7 +241,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
                         <p className="mt-1 text-xs text-muted-foreground">
                           Stake {leader.publishedStake?.toLocaleString("es-ES", { maximumFractionDigits: 0 }) ?? "—"}
                           {" · "}recompensa {leader.publishedRewardUsd === null ? "—" : usd(leader.publishedRewardUsd)}
-                          {" · "}PnL papel <span className={tone(leader.copiedPnl)}>{sol(leader.copiedPnl)}</span>
+                          {" · "}PnL papel <span className={tone(leader.copiedPnl)}>{money(leader.copiedPnl, true)}</span>
                         </p>
                       </div>
                       <CopySwitch
@@ -269,7 +293,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
                   stroke={view.account.equity >= view.account.startingEquity ? "#22C55E" : "#EF4444"}
                   baseline={view.account.startingEquity}
                   baselineLabel="inicio"
-                  formatY={(value) => `${value.toFixed(2)} SOL`}
+                  formatY={(value) => money(value)}
                 />
               </CardContent>
             </Card>
@@ -308,7 +332,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
                 <CardContent className="flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-2">
                     <Sparkline points={leader.series} label={leader.name} />
-                    <p className={`num text-sm ${tone(leader.copiedPnl)}`}>{sol(leader.copiedPnl)}</p>
+                    <p className={`num text-sm ${tone(leader.copiedPnl)}`}>{money(leader.copiedPnl, true)}</p>
                   </div>
                   <dl className="grid grid-cols-3 gap-2 text-xs">
                     <Stat k="Acierto" v={pct(leader.winRate)} />
@@ -353,7 +377,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
                         <TableCell className="num">{position.entryPrice.toPrecision(3)}</TableCell>
                         <TableCell className="num">{position.mark.toPrecision(3)}</TableCell>
                         <TableCell className="num">{position.stopPrice.toPrecision(3)}</TableCell>
-                        <TableCell className={`num ${tone(position.unrealized)}`}>{sol(position.unrealized)}</TableCell>
+                        <TableCell className={`num ${tone(position.unrealized)}`}>{money(position.unrealized, true)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -384,7 +408,7 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
                         <span className="block text-xs text-muted-foreground">{trade.leaderName} · comisión {trade.feeSol.toFixed(4)}</span>
                       </TableCell>
                       <TableCell className={`num ${tone(trade.pnlSol ?? 0)}`}>
-                        {trade.pnlSol === null ? "—" : sol(trade.pnlSol)}
+                        {trade.pnlSol === null ? "—" : money(trade.pnlSol, true)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -442,13 +466,13 @@ export function Desk({ initialView = null }: { initialView?: DeskView | null }) 
               >
                 <Field label="Fracción del patrimonio" suffix="%" value={settings.fraction * 100} onChange={(value) => edit("fraction", value / 100)} />
                 <Field label="Tope de la fracción" suffix="%" value={settings.fractionCap * 100} onChange={(value) => edit("fractionCap", value / 100)} />
-                <Field label="Mínimo por operación" suffix="SOL" value={settings.minSol} onChange={(value) => edit("minSol", value)} />
+                <Field label="Mínimo por operación" suffix="US$" value={settings.minSol} onChange={(value) => edit("minSol", value)} />
                 <Field label="Antigüedad máxima" suffix="s" value={settings.maxSignalAgeMs / 1000} onChange={(value) => edit("maxSignalAgeMs", value * 1000)} />
                 <Field label="Deriva máxima" suffix="%" value={settings.maxPriceDriftBps / 100} onChange={(value) => edit("maxPriceDriftBps", value * 100)} />
-                <Field label="Capital por líder" suffix="SOL" value={settings.leaderCapitalCapSol} onChange={(value) => edit("leaderCapitalCapSol", value)} />
+                <Field label="Capital por líder" suffix="US$" value={settings.leaderCapitalCapSol} onChange={(value) => edit("leaderCapitalCapSol", value)} />
                 <Field label="Drawdown para pausar" suffix="%" value={settings.leaderDrawdownPause * 100} onChange={(value) => edit("leaderDrawdownPause", value / 100)} />
                 <Field label="Enfriamiento del token" suffix="s" value={settings.mintCooldownMs / 1000} onChange={(value) => edit("mintCooldownMs", value * 1000)} />
-                <Field label="Pérdida diaria máxima" suffix="SOL" value={settings.dailyLossKillSol} onChange={(value) => edit("dailyLossKillSol", value)} />
+                <Field label="Pérdida diaria máxima" suffix="US$" value={settings.dailyLossKillSol} onChange={(value) => edit("dailyLossKillSol", value)} />
                 <Field label="Stop de protección" suffix="%" value={settings.protectiveStopPct * 100} onChange={(value) => edit("protectiveStopPct", value / 100)} />
                 <Field label="Comisión" suffix="%" value={settings.feeBps / 100} onChange={(value) => edit("feeBps", value * 100)} />
                 <Field label="Deslizamiento" suffix="%" value={settings.slippageBps / 100} onChange={(value) => edit("slippageBps", value * 100)} />

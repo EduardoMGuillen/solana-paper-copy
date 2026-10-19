@@ -9,6 +9,7 @@ import {
 } from "./money";
 import { proportionalSellFraction } from "./exits";
 import { stopTriggered } from "./exits";
+import { STARTING_USD } from "./constants";
 import { defaultSettings } from "./settings";
 import type {
   EngineState,
@@ -68,11 +69,11 @@ export function blankLeader(
 
 export function createInitialState(now: number): EngineState {
   return {
-    version: 1,
+    version: 2,
     seq: 1,
-    cashSol: 10,
-    startingEquity: 10,
-    accountPeak: 10,
+    cashSol: STARTING_USD,
+    startingEquity: STARTING_USD,
+    accountPeak: STARTING_USD,
     settings: { ...defaultSettings, blocklist: [] },
     leaders: [
       blankLeader({
@@ -103,7 +104,7 @@ export function createInitialState(now: number): EngineState {
     positions: [],
     trades: [],
     skips: [],
-    equityCurve: [{ t: now, equity: 10 }],
+    equityCurve: [{ t: now, equity: STARTING_USD }],
     drawdownCurve: [{ t: now, drawdown: 0 }],
     series: {},
     prices: {
@@ -272,9 +273,14 @@ function pushTrade(
     price: number;
     notionalSol: number;
     feeSol: number;
+    slippage: number;
+    entry: number | null;
+    exit: number | null;
     pnlSol: number | null;
     reason: TradeReason;
     ts: number;
+    openedAt: number | null;
+    closedAt: number | null;
   },
 ): void {
   state.trades.push({ id: nextId(state, "trade"), ...input });
@@ -295,6 +301,7 @@ export function closePosition(
   const cost = position.costSol * fractionUsed;
   const filled = exitProceeds(qty, mark, state.settings.slippageBps, state.settings.feeBps);
   const pnl = filled.proceeds - cost;
+  const slippage = Math.max(0, qty * mark - filled.gross);
   state.cashSol += filled.proceeds;
   position.qty -= qty;
   position.costSol -= cost;
@@ -310,9 +317,14 @@ export function closePosition(
     price: filled.price,
     notionalSol: filled.gross,
     feeSol: filled.fee,
+    slippage,
+    entry: position.entryPrice,
+    exit: filled.price,
     pnlSol: pnl,
     reason,
     ts: now,
+    openedAt: position.openedAt,
+    closedAt: now,
   });
   state.kill.realizedToday += pnl;
   enforceKill(state);
@@ -364,6 +376,7 @@ export function applyFill(state: EngineState, fill: LeaderFill): void {
     if (!(exec > 0)) return;
     const fee = feeSol(decision.sizeSol, state.settings.feeBps);
     const qty = decision.sizeSol / exec;
+    const slippage = Math.max(0, qty * exec - qty * fill.currentPriceSol);
     state.cashSol -= decision.sizeSol + fee;
     const existing = state.positions.find(
       (position) => position.leaderId === leader.id && position.mint === fill.mint,
@@ -399,9 +412,14 @@ export function applyFill(state: EngineState, fill: LeaderFill): void {
       price: exec,
       notionalSol: decision.sizeSol,
       feeSol: fee,
+      slippage,
+      entry: exec,
+      exit: null,
       pnlSol: null,
       reason: "entrada",
       ts: fill.observedAt,
+      openedAt: fill.observedAt,
+      closedAt: null,
     });
     return;
   }
@@ -418,6 +436,17 @@ export function applyFill(state: EngineState, fill: LeaderFill): void {
     "salida",
     fill.observedAt,
   );
+}
+
+/** Close every open copy at the latest mark, charging fee and slippage. */
+export function flattenOpenPositions(state: EngineState, now: number): number {
+  const open = state.positions.filter((position) => position.qty > 0);
+  for (const position of open) {
+    const mark = state.prices[position.mint] ?? position.entryPrice;
+    closePosition(state, position, 1, mark, "apagado", now);
+  }
+  snapshot(state, now);
+  return open.length;
 }
 
 export function applyProtectiveStops(state: EngineState, now: number): void {

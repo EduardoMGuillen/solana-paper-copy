@@ -29,7 +29,7 @@ export type RiskSettings = {
   leaderDrawdownPause: number;
   mintCooldownMs: number;
   blocklist: string[];
-  /** Realized loss today (positive SOL number) that trips the kill switch. */
+  /** Realized loss today, in account dollars, that trips the kill switch. */
   dailyLossKillSol: number;
   protectiveStopPct: number;
   feeBps: number;
@@ -140,7 +140,7 @@ export type Position = {
   stopPrice: number;
 };
 
-export type TradeReason = "entrada" | "salida" | "stop" | "cierre";
+export type TradeReason = "entrada" | "salida" | "stop" | "cierre" | "apagado";
 
 export type Trade = {
   id: string;
@@ -152,9 +152,17 @@ export type Trade = {
   price: number;
   notionalSol: number;
   feeSol: number;
+  /** Dollar slippage versus the mark, already inside the fill price. */
+  slippage: number;
+  /** Average entry of the copy. Present on both buys and sells. */
+  entry: number | null;
+  /** Fill price after slippage. Null until the copy is sold. */
+  exit: number | null;
   pnlSol: number | null;
   reason: TradeReason;
   ts: number;
+  openedAt: number | null;
+  closedAt: number | null;
 };
 
 export type Skip = {
@@ -171,7 +179,7 @@ export type EquityPoint = { t: number; equity: number };
 export type DrawdownPoint = { t: number; drawdown: number };
 
 export type EngineState = {
-  version: 1;
+  version: 2;
   seq: number;
   cashSol: number;
   startingEquity: number;
@@ -222,6 +230,7 @@ export const TRADE_LABEL: Record<TradeReason, string> = {
   salida: "Salida proporcional",
   stop: "Stop de protección",
   cierre: "Cierre al quitar líder",
+  apagado: "Cierre al detener la mesa",
 };
 
 export const REASON_ORDER: RejectReason[] = [

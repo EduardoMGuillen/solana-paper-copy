@@ -5,6 +5,7 @@ import {
   applyMeteoraRoster,
   applyProtectiveStops,
   createInitialState,
+  flattenOpenPositions,
   setKill,
 } from "./engine";
 import type { MeteoraWallet } from "./types";
@@ -32,7 +33,7 @@ describe("paper engine", () => {
     expect(opened).toBeTruthy();
     const openedQty = opened?.qty ?? 0;
     const bought = state.trades.find((trade) => trade.side === "buy");
-    expect(bought?.notionalSol).toBeCloseTo(0.2);
+    expect(bought?.notionalSol).toBeCloseTo(2);
     expect(bought?.notionalSol).not.toBeCloseTo(200);
     applyFill(state, {
       leaderId: leader.id,
@@ -108,11 +109,44 @@ describe("paper engine", () => {
     const state = createSeededState(1_700_000_000_000);
     const buys = state.trades.filter((trade) => trade.side === "buy");
     expect(buys.length).toBeGreaterThan(0);
-    expect(Math.max(...buys.map((trade) => trade.notionalSol))).toBeLessThan(1);
+    expect(state.startingEquity).toBe(100);
+    expect(Math.max(...buys.map((trade) => trade.notionalSol))).toBeLessThan(8);
     expect(state.leaders.find((leader) => leader.id === "lumen")?.stats.wins).toBeGreaterThan(0);
     expect(state.leaders.find((leader) => leader.id === "fosa")?.stats.maxDrawdown).toBeGreaterThan(0.05);
     expect(state.kill.auto).toBe(false);
     expect(state.equityCurve.length).toBeGreaterThan(10);
     expect(state.series.lumen?.length).toBeGreaterThan(5);
+  });
+
+  it("flattens every open copy at the mark, with fee and slippage", () => {
+    const state = createInitialState(5_000_000);
+    const leader = state.leaders[0];
+    applyFill(state, {
+      leaderId: leader.id,
+      mint: "PaperAURA111111111111111111111111111111111",
+      symbol: "AURA",
+      side: "buy",
+      leaderQtyBefore: 0,
+      leaderQtyAfter: 100,
+      fillPriceSol: 1,
+      fillTime: 5_000_000,
+      observedAt: 5_000_000,
+      currentPriceSol: 1,
+      leaderNotionalSol: 400,
+    });
+    expect(state.positions).toHaveLength(1);
+    const closed = flattenOpenPositions(state, 5_100_000);
+    expect(closed).toBe(1);
+    expect(state.positions).toHaveLength(0);
+    const trade = state.trades.find((item) => item.reason === "apagado");
+    expect(trade).toBeTruthy();
+    expect(trade?.side).toBe("sell");
+    expect(trade?.feeSol).toBeGreaterThan(0);
+    expect(trade?.slippage).toBeGreaterThan(0);
+    expect(trade?.exit).toBeLessThan(1);
+    expect(trade?.entry).toBeGreaterThan(1);
+    expect(trade?.pnlSol).not.toBeNull();
+    expect(trade?.openedAt).toBe(5_000_000);
+    expect(trade?.closedAt).toBe(5_100_000);
   });
 });

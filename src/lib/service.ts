@@ -14,13 +14,14 @@ import {
 import { clampSettings } from "./engine/settings";
 import type { EngineState, RiskSettings } from "./engine/types";
 import { toView, type DeskView } from "./engine/view";
+import { writeEffectiveness } from "./effectiveness";
 import { fetchMeteoraTop } from "./meteora";
 import { pollWalletSwaps } from "./rpc";
 import { loadState, saveState } from "./store";
 
 const g = globalThis as unknown as { __paperQueue?: Promise<unknown> };
 
-function withState<T>(fn: (state: EngineState) => Promise<T>): Promise<T> {
+export function withState<T>(fn: (state: EngineState) => Promise<T>): Promise<T> {
   const previous = g.__paperQueue ?? Promise.resolve();
   const job = previous.then(() => loadState()).then(fn);
   g.__paperQueue = job.then(
@@ -85,8 +86,18 @@ async function tick(state: EngineState): Promise<EngineState> {
   return state;
 }
 
+async function persist(state: EngineState, replace = false) {
+  await saveState(state);
+  const saved = await writeEffectiveness(state, { replace });
+  return toView(state, saved);
+}
+
 export function readDesk(): Promise<DeskView> {
-  return withState(async (state) => toView(await tick(state)));
+  return withState(async (state) => {
+    const next = await tick(state);
+    const saved = await writeEffectiveness(next);
+    return toView(next, saved);
+  });
 }
 
 export function runAction(body: {
@@ -108,11 +119,9 @@ export function runAction(body: {
     else if (body.type === "reset") {
       const { createSeededState } = await import("./engine/demo");
       const fresh = createSeededState(now);
-      await saveState(fresh);
-      return { ok: true as const, view: toView(fresh) };
+      return { ok: true as const, view: await persist(fresh, true) };
     } else error = "Acción desconocida.";
-    await saveState(state);
-    const view = toView(state);
+    const view = await persist(state);
     return error ? { ok: false as const, error, view } : { ok: true as const, view };
   });
 }

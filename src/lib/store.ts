@@ -2,14 +2,17 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createSeededState } from "./engine/demo";
 import type { EngineState } from "./engine/types";
+import { dataDir } from "./paths";
 
-const file = path.join(process.cwd(), "data", "paper-state.json");
+function stateFile(): string {
+  return path.join(dataDir(), "paper-state.json");
+}
 
 export async function loadState(): Promise<EngineState> {
   try {
-    const raw = await readFile(file, "utf8");
+    const raw = await readFile(stateFile(), "utf8");
     const parsed = JSON.parse(raw) as EngineState;
-    if (parsed.version !== 1 || !parsed.kill || !Array.isArray(parsed.leaders)) {
+    if (parsed.version !== 2 || !parsed.kill || !Array.isArray(parsed.leaders)) {
       throw new Error("estado incompatible");
     }
     parsed.series ??= {};
@@ -41,6 +44,7 @@ export async function loadState(): Promise<EngineState> {
 }
 
 export async function saveState(state: EngineState): Promise<void> {
+  const file = stateFile();
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   await writeFile(tmp, JSON.stringify(state));

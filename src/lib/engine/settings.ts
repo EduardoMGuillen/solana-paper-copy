@@ -10,7 +10,8 @@ export const defaultSettings: RiskSettings = {
   leaderDrawdownPause: 0.2,
   mintCooldownMs: 12_000,
   blocklist: [],
-  dailyLossKillSol: 0.5,
+  /** Five percent of the 100 US$ book. The old 0.50 limit belonged to a 10-unit book. */
+  dailyLossKillSol: 5,
   protectiveStopPct: 0.15,
   feeBps: 10,
   slippageBps: 30,
