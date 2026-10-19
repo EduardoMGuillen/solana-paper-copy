@@ -105,10 +105,19 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
       }
     }
     void load();
-    const timer = window.setInterval(() => void load(), 5000);
+    // Decisions happen on 4h closes; 30 s keeps the view fresh with little traffic.
+    // A hidden tab does not poll, and catches up as soon as it is shown again.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 30_000);
+    const onVisible = () => {
+      if (!document.hidden) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       stop = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

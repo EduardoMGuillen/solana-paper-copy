@@ -111,7 +111,15 @@ function marketView(state: BotState, book: MarketBook, candles: Candle[] | undef
           at: book.validation.at,
           bars: book.validation.bars,
           chosen: book.validation.chosen,
-          checks: book.validation.checks.map((check) => ({ ...check, name: STRATEGIES[check.strategy].name })),
+          // The backtest curves stay server-side; the dashboard only shows the table.
+          checks: book.validation.checks.map((check) => ({
+            strategy: check.strategy,
+            name: STRATEGIES[check.strategy].name,
+            pass: check.pass,
+            reasons: check.reasons,
+            full: check.full,
+            oosReturn: check.oosReturn,
+          })),
         }
       : null,
   };

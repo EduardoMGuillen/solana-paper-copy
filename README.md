@@ -98,6 +98,12 @@ npm run backtest   # every strategy × every market; args: interval bars risk st
 
 The bot runs inside the server process (every 15 s) whether or not a browser is open. Positions persist in `data/bot-state.json` across restarts. Market data comes from Binance's public mirror (`data-api.binance.vision`, no key), with Coinbase as a fallback for SOL, BTC and ETH. Override the mirror with `BINANCE_DATA_URL`.
 
+## Deploy 24/7 (Google Cloud or Oracle)
+
+See [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). One command (`sudo bash deploy/install.sh`) installs the bot on a Debian/Ubuntu VM with HTTPS (Caddy + sslip.io), a random password, and a hardened systemd service.
+
+The whole app (dashboard and API) is behind HTTP Basic auth when `BOT_PASSWORD` is set. Without it, the app answers on localhost only.
+
 ## Going live (not implemented, on purpose)
 
 Before risking money:
