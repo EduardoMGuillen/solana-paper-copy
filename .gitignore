@@ -43,3 +43,7 @@ next-env.d.ts
 
 # paper account
 /data
+
+# dedicated wallet — never commit the key or its address file
+wallet.json
+wallet.address

@@ -116,6 +116,22 @@ async function coinbaseCandles(product: string, interval: Interval, bars: number
   return [...grouped.values()].slice(-bars);
 }
 
+/** Binance spot price, or null when the body is not a positive number. */
+export function parseTickerPrice(body: unknown): number | null {
+  if (!body || typeof body !== "object") return null;
+  const price = Number((body as { price?: unknown }).price);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+/** Latest SOL/USDT. Null on a network or parse failure so the page can still show SOL. */
+export async function fetchSolUsd(): Promise<number | null> {
+  try {
+    return parseTickerPrice(await getJson<unknown>(`${BINANCE}/api/v3/ticker/price?symbol=SOLUSDT`));
+  } catch {
+    return null;
+  }
+}
+
 export type CandleFetch = { candles: Candle[]; source: string };
 
 export async function fetchCandles(market: Market, interval: Interval, bars: number): Promise<CandleFetch> {

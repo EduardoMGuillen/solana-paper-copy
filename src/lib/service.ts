@@ -16,6 +16,7 @@ import { fetchCandles, marketById, type Interval } from "./bot/market";
 import { clampBotSettings, PROFILES, type BotSettings, type ProfileId } from "./bot/settings";
 import { toView, type BotView } from "./bot/view";
 import { jupiterConfig } from "./exec/jupiter";
+import { kickLiveLp } from "./exec/lp-runner";
 import { applyShadowOutcome, planShadowJobs, runShadowJobs } from "./exec/runner";
 import { emptyShadow } from "./exec/shadow";
 import { formatAlerts, logSeq, pendingAlerts, sendTelegram, telegramConfig } from "./notify/telegram";
@@ -189,6 +190,7 @@ export async function tick(): Promise<void> {
     await shadow();
     await notify();
     kickMeteoraForward();
+    kickLiveLp();
   } finally {
     g.__botTicking = false;
   }

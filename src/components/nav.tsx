@@ -5,13 +5,14 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/", label: "Estrategia" },
-  { href: "/meteora", label: "Meteora" },
+  { href: "/meteora", label: "Meteora papel" },
+  { href: "/meteora-live", label: "Meteora live" },
 ];
 
 export function DeskNav() {
   const path = usePathname();
   return (
-    <nav className="flex gap-3 text-sm">
+    <nav className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
       {LINKS.map((link) => {
         const on = path === link.href;
         return (

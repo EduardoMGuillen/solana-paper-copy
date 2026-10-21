@@ -131,7 +131,7 @@ export function MeteoraPanel() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Rendimiento de los pools</h1>
             <p className="max-w-2xl text-sm text-muted-foreground">
-              Posiciones simuladas, solo en SOL y por debajo del precio. Este sol no sale de la cuenta de trades. Si la media sale negativa, la estrategia pierde de verdad: las comisiones ya son una cota optimista.
+              Posiciones simuladas, solo en SOL y por debajo del precio. Este sol no sale de la cuenta de trades. Si la media sale negativa, la estrategia pierde de verdad: las comisiones ya son una cota optimista. La wallet real, sin fondos y sin firmar, está en Meteora live y este libro no la usa.
             </p>
             <ExperimentBalances tradesSol={trades ? tradesBalanceSol(trades) : null} />
           </div>
