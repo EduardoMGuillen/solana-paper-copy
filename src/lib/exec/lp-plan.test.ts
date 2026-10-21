@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PAPER_LIVE_PARAMS } from "./live-params";
-import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, positionValue, solPerToken, type LiveCandidate, type PositionMark } from "./lp-plan";
+import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, positionValue, RECENTER_ABOVE, solPerToken, type LiveCandidate, type PositionMark } from "./lp-plan";
 import type { LivePosition } from "./live-book";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
@@ -207,6 +207,24 @@ describe("live open plan", () => {
     expect(unread?.note).toMatch(/No se pudo leer/);
     const late = markOne(undefined, 1_000 + PAPER_LIVE_PARAMS.holdHours * 3_600_000);
     expect(late?.closeReason).toBe("time");
+  });
+
+  it("closes to re-center when the price runs away above the range", () => {
+    const up = 0.001 * (1 + RECENTER_ABOVE);
+    const marked = markOne({ exists: true, valueLamports: 100_200_000, price: up * 1.01 }, 2_000, { lastPrice: up });
+    expect(marked?.closeReason).toBe("above");
+    expect(marked?.closing).toBe(true);
+  });
+
+  it("keeps a position whose price rose less than the re-center line", () => {
+    const up = 0.001 * (1 + RECENTER_ABOVE * 0.5);
+    const marked = markOne({ exists: true, valueLamports: 100_000_000, price: up }, 2_000, { lastPrice: up });
+    expect(marked?.closing).toBe(false);
+  });
+
+  it("does not re-center a position the price came back into", () => {
+    const marked = markOne({ exists: true, valueLamports: 101_000_000, price: 0.0009 }, 2_000, { lastPrice: 0.0009 });
+    expect(marked?.closing).toBe(false);
   });
 
   it("closes the record when the position account is gone", () => {

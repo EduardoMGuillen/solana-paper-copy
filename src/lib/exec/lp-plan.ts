@@ -33,6 +33,14 @@ export const BIN_ARRAY_RENT_LAMPORTS = 71_437_440;
 /** The open is refused when the on-chain price is this far from the screened price. */
 export const MAX_OPEN_PRICE_DRIFT = 0.1;
 
+/**
+ * Bid-Ask sits wholly below the price it opened at, so a token that runs up
+ * leaves the SOL idle and earning nothing. Past this rise the position is
+ * closed and the next pass may open again at the new price. Not yet validated
+ * on collected data.
+ */
+export const RECENTER_ABOVE = 0.1;
+
 /** `pricePerToken` from the SDK is X priced in Y. Returns SOL per token either way. */
 export function solPerToken(pricePerToken: number, solIsY: boolean): number {
   if (!(pricePerToken > 0) || !Number.isFinite(pricePerToken)) return 0;
@@ -169,6 +177,9 @@ function markAt(position: LivePosition, mark: PositionMark | undefined, now: num
   const marked: LivePosition = { ...position, lastPrice: price ?? position.lastPrice, tokenPct, positionPct, note: "" };
   if (price && position.lastPrice && price / position.lastPrice <= 0.8) {
     return { ...marked, closing: true, closeReason: "rug", note: "El precio cayó de golpe. Cerrando." };
+  }
+  if (tokenPct != null && tokenPct >= RECENTER_ABOVE) {
+    return { ...marked, closing: true, closeReason: "above", note: "El precio subió lejos del rango. Cerrando para reabrir." };
   }
   if (positionPct == null) return marked;
   if (positionPct >= params.takeProfit) return { ...marked, closing: true, closeReason: "take-profit", note: "Llegó a la toma. Cerrando." };

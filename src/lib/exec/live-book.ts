@@ -5,9 +5,9 @@
  * One with a signature stays "closing" until the chain close is confirmed.
  */
 
-export type LiveCloseReason = "stop" | "manual" | "take-profit" | "loss" | "time" | "rug" | "gone";
+export type LiveCloseReason = "stop" | "manual" | "take-profit" | "loss" | "time" | "rug" | "gone" | "above";
 
-const CLOSE_REASONS = new Set<LiveCloseReason>(["stop", "manual", "take-profit", "loss", "time", "rug", "gone"]);
+const CLOSE_REASONS = new Set<LiveCloseReason>(["stop", "manual", "take-profit", "loss", "time", "rug", "gone", "above"]);
 
 export type LivePosition = {
   address: string;

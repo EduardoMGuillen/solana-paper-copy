@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closeAllPositions, closeOnePosition, type LivePosition } from "./live-book";
+import { closeAllPositions, closeOnePosition, parseLivePosition, type LivePosition } from "./live-book";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
 const other = "95zNQQ8juGpu8odzpbp63ZNtXuTnnBeBsHovUjpe32d8";
@@ -49,5 +49,10 @@ describe("live position closes", () => {
     const result = closeOnePosition([row(pool, null)], other);
     expect(result.found).toBe(false);
     expect(result.positions).toHaveLength(1);
+  });
+
+  it("keeps the re-center close reason when the book is read back", () => {
+    const closing = { ...row(pool, "sig"), closing: true, closeReason: "above" as const };
+    expect(parseLivePosition(JSON.parse(JSON.stringify(closing)))?.closeReason).toBe("above");
   });
 });
