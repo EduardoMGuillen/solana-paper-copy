@@ -87,7 +87,7 @@ Auth: src/proxy.ts (HTTP Basic auth when BOT_PASSWORD is set; otherwise localhos
 | `src/components/desk.tsx`, `charts.tsx` | Dashboard, candlestick chart. |
 | `scripts/*.ts` | Research CLIs (backtest, rotation, meteora). |
 | `deploy/install.sh`, `deploy/GUIA-GOOGLE-CLOUD.md` | One-command VM install: Caddy HTTPS, systemd, Meteora timer. |
-| `docs/` | `GUIA-DE-USO.md` (owner's guide), `CORRER-EN-CASA.md`, `EJECUCION-REAL.md` (live design). |
+| `docs/` | `GUIA-DE-USO.md` (owner's guide), `CORRER-EN-CASA.md`, `EJECUCION-REAL.md` (live design), `CLAUDE-CHANGES.md` (log of Claude commits; add an entry with each one). |
 
 ## Environment variables
 
