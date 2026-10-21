@@ -4,6 +4,7 @@
  */
 
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { Connection, Keypair, PublicKey, type Transaction } from "@solana/web3.js";
 import BN from "bn.js";
@@ -11,14 +12,19 @@ import { DEFAULT_RPC, readWalletAddress } from "./wallet";
 import { WSOL } from "../lp/meteora";
 import type { LivePosition } from "./live-book";
 import type { OpenOrder } from "./lp-plan";
+import { decideSell, impactTooHigh } from "./sell-rule";
 
 export type SentOpen = { signature: string; position: string; minBinId: number; maxBinId: number };
+
+export type SellResult = { sold: true; signature: string; outLamports: bigint } | { sold: false; reason: string };
 
 export type LiveChain = {
   balanceLamports(owner: string): Promise<number>;
   landed(signature: string): Promise<boolean>;
   open(order: OpenOrder, onSent: (sent: SentOpen) => void): Promise<SentOpen>;
   close(position: LivePosition, onSent: (signature: string) => void): Promise<string>;
+  /** Swap the token left by a close back to SOL. A skip does not undo the close. */
+  sell(position: LivePosition, onSent: (signature: string) => void): Promise<SellResult>;
 };
 
 type DlmmPool = {
@@ -26,7 +32,16 @@ type DlmmPool = {
   tokenY: { publicKey: PublicKey; mint: { mintAuthority: PublicKey | null; freezeAuthority: PublicKey | null; decimals: number } };
   getActiveBin(): Promise<{ binId: number }>;
   getBinArrayForSwap(swapForY: boolean): Promise<unknown[]>;
-  swapQuote(inAmount: BN, swapForY: boolean, allowedSlippage: BN, binArrays: unknown[]): { outAmount: BN; priceImpact: { toString(): string } };
+  swapQuote(inAmount: BN, swapForY: boolean, allowedSlippage: BN, binArrays: unknown[]): { outAmount: BN; minOutAmount: BN; priceImpact: { toString(): string }; binArraysPubkey: PublicKey[] };
+  swap(args: {
+    inToken: PublicKey;
+    outToken: PublicKey;
+    inAmount: BN;
+    minOutAmount: BN;
+    lbPair: PublicKey;
+    user: PublicKey;
+    binArraysPubkey: PublicKey[];
+  }): Promise<Transaction>;
   initializePositionAndAddLiquidityByStrategy(args: {
     positionPubKey: PublicKey;
     user: PublicKey;
@@ -60,9 +75,27 @@ function connection(env: Record<string, string | undefined>): Connection {
   return new Connection(env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC, "confirmed");
 }
 
+type DlmmSdk = {
+  create: (connection: Connection, pool: PublicKey) => Promise<DlmmPool>;
+  StrategyType: { BidAsk: number };
+};
+
+let dlmmSdk: DlmmSdk | null = null;
+
+function loadDlmm(): DlmmSdk {
+  if (dlmmSdk) return dlmmSdk;
+  // A runtime path keeps Next from turning this into the SDK's ESM build.
+  const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
+  const file = path.join(process.cwd(), "src", "lib", "exec", "load-dlmm.cjs");
+  const sdk = nodeRequire(file) as DlmmSdk;
+  if (typeof sdk?.create !== "function") throw new Error("No se pudo cargar Meteora.");
+  dlmmSdk = sdk;
+  return sdk;
+}
+
 async function poolOf(rpc: Connection, address: string): Promise<DlmmPool> {
-  const { default: DLMM } = await import("@meteora-ag/dlmm");
-  return DLMM.create(rpc, new PublicKey(address)) as Promise<DlmmPool>;
+  const sdk = await loadDlmm();
+  return sdk.create(rpc, new PublicKey(address));
 }
 
 function simText(err: unknown, logs: string[] | null | undefined): string {
@@ -89,10 +122,22 @@ function clearAuthority(mint: { mintAuthority: PublicKey | null; freezeAuthority
   return mint.mintAuthority == null && mint.freezeAuthority == null;
 }
 
+async function tokenRaw(rpc: Connection, owner: PublicKey, mint: PublicKey): Promise<bigint> {
+  const found = await rpc.getParsedTokenAccountsByOwner(owner, { mint });
+  let total = BigInt(0);
+  for (const row of found.value) {
+    const data = row.account.data as { parsed?: { info?: { tokenAmount?: { amount?: unknown } } } };
+    const amount = data.parsed?.info?.tokenAmount?.amount;
+    if (typeof amount === "string" && /^\d+$/.test(amount)) total += BigInt(amount);
+  }
+  return total;
+}
+
 export function liveChain(dir: string, env: Record<string, string | undefined> = process.env): LiveChain {
   const rpc = connection(env);
-  const maxImpact = (Number(env.LIVE_MAX_PRICE_IMPACT_BPS) || 150) / 10_000;
-  const slippagePct = Math.min(1, (Number(env.LIVE_MAX_SLIPPAGE_BPS) || 100) / 100);
+  const maxImpactBps = Number(env.LIVE_MAX_PRICE_IMPACT_BPS) || 150;
+  const slippageBps = Math.min(1_000, Math.max(1, Math.round(Number(env.LIVE_MAX_SLIPPAGE_BPS) || 100)));
+  const slippagePct = Math.min(1, slippageBps / 100);
   return {
     balanceLamports: (owner) => rpc.getBalance(new PublicKey(owner), "confirmed"),
     async landed(signature) {
@@ -116,9 +161,9 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const binsForQuote = await pool.getBinArrayForSwap(swapForY);
       const tokens = order.lamports / 1_000_000_000 / order.price;
       const raw = BigInt(Math.max(1, Math.round(tokens * 10 ** token.mint.decimals)));
-      const quote = pool.swapQuote(new BN(raw.toString()), swapForY, new BN(100), binsForQuote);
+      const quote = pool.swapQuote(new BN(raw.toString()), swapForY, new BN(slippageBps), binsForQuote);
       const impact = Number(quote.priceImpact.toString());
-      if (!(quote.outAmount.gtn(0)) || !Number.isFinite(impact) || impact > maxImpact) {
+      if (!(quote.outAmount.gtn(0)) || impactTooHigh(impact, maxImpactBps)) {
         throw new Error("No hay una salida a SOL con un impacto aceptable.");
       }
       const active = await pool.getActiveBin();
@@ -132,7 +177,7 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
         user: wallet.publicKey,
         totalXAmount: solIsY ? new BN(0) : lamports,
         totalYAmount: solIsY ? lamports : new BN(0),
-        strategy: { minBinId, maxBinId, strategyType: (await import("@meteora-ag/dlmm")).StrategyType.BidAsk },
+        strategy: { minBinId, maxBinId, strategyType: loadDlmm().StrategyType.BidAsk },
         slippage: slippagePct,
       });
       const sent: SentOpen = { signature: "", position: position.publicKey.toBase58(), minBinId, maxBinId };
@@ -163,6 +208,40 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       let signature = "";
       for (const tx of txs) signature = await commit(rpc, tx, [wallet], onSent);
       return signature;
+    },
+    async sell(position, onSent) {
+      if (!position.tokenMint) return { sold: false, reason: "none" };
+      const wallet = loadKeypair(dir);
+      const pool = await poolOf(rpc, position.address);
+      const solIsY = pool.tokenY.publicKey.toBase58() === WSOL;
+      const solIsX = pool.tokenX.publicKey.toBase58() === WSOL;
+      if (solIsY !== position.solIsY || (!solIsY && !solIsX)) return { sold: false, reason: "El lado del SOL no coincide. El token se quedó en la wallet." };
+      const token = solIsY ? pool.tokenX : pool.tokenY;
+      const sol = solIsY ? pool.tokenY : pool.tokenX;
+      if (token.publicKey.toBase58() !== position.tokenMint) return { sold: false, reason: "El token del pool no coincide. Se quedó en la wallet." };
+      const raw = await tokenRaw(rpc, wallet.publicKey, token.publicKey);
+      if (raw <= BigInt(0)) return { sold: false, reason: "none" };
+      const swapForY = solIsY;
+      const bins = await pool.getBinArrayForSwap(swapForY);
+      const quote = pool.swapQuote(new BN(raw.toString()), swapForY, new BN(slippageBps), bins);
+      const decision = decideSell({
+        rawAmount: raw,
+        outLamports: BigInt(quote.outAmount.toString()),
+        priceImpactPercent: Number(quote.priceImpact.toString()),
+        maxImpactBps,
+      });
+      if (!decision.sell) return { sold: false, reason: decision.reason };
+      const tx = await pool.swap({
+        inToken: token.publicKey,
+        outToken: sol.publicKey,
+        inAmount: new BN(raw.toString()),
+        minOutAmount: quote.minOutAmount,
+        lbPair: new PublicKey(position.address),
+        user: wallet.publicKey,
+        binArraysPubkey: quote.binArraysPubkey,
+      });
+      const signature = await commit(rpc, tx, [wallet], onSent);
+      return { sold: true, signature, outLamports: BigInt(quote.outAmount.toString()) };
     },
   };
 }

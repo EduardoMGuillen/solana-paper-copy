@@ -11,7 +11,7 @@ export type IntentStatus = "pending" | "sent" | "confirmed" | "failed";
 export type Intent = {
   id: string;
   at: number;
-  kind: "open" | "close";
+  kind: "open" | "close" | "sell";
   pool: string;
   name: string;
   position: string | null;

@@ -55,6 +55,10 @@ function chain(balance: number, calls: string[]): LiveChain {
       onSent("sigclose");
       return "sigclose";
     },
+    sell: async () => {
+      calls.push("sell");
+      return { sold: false, reason: "none" };
+    },
   };
 }
 
@@ -99,7 +103,7 @@ describe("live cycle", () => {
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     setLiveBot(dir, false);
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
-    expect(calls).toEqual(["open", "close"]);
+    expect(calls).toEqual(["open", "close", "sell"]);
     expect(readLiveFile(dir).running).toBe(false);
     expect(readLiveFile(dir).positions).toHaveLength(0);
   });
@@ -115,9 +119,48 @@ describe("live cycle", () => {
     expect(closeLivePosition(dir, pool).error).toBeNull();
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     await runLiveCycle(dir, used, async () => [candidate()], env, 30_000);
-    expect(calls).toEqual(["open", "close", "open"]);
+    expect(calls).toEqual(["open", "close", "sell", "open"]);
     expect(readLiveFile(dir).running).toBe(true);
     expect(readLiveFile(dir).positions).toHaveLength(1);
+  });
+
+  it("keeps the position closed when the token sale fails and records the sale when it lands", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const used = chain(2_000_000_000, calls);
+    used.sell = async () => {
+      calls.push("sell");
+      throw new Error("La simulación rechazó la venta.");
+    };
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    setLiveBot(dir, false);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
+    expect(readLiveFile(dir).positions).toHaveLength(0);
+    expect(readLiveFile(dir).notice).toMatch(/se quedó/);
+    expect(readIntents(dir).some((intent) => intent.kind === "sell" && intent.status === "failed")).toBe(true);
+
+    const again = tempDir();
+    createDedicatedWallet(again);
+    setLiveBot(again, true);
+    const sold: string[] = [];
+    const seller = chain(2_000_000_000, sold);
+    seller.sell = async (_position, onSent) => {
+      sold.push("sell");
+      onSent("sigsell");
+      return { sold: true, signature: "sigsell", outLamports: BigInt(12_000_000) };
+    };
+    await runLiveCycle(again, seller, async () => [candidate()], env, 10_000);
+    setLiveBot(again, false);
+    await runLiveCycle(again, seller, async () => [candidate()], env, 20_000);
+    expect(readLiveFile(again).positions).toHaveLength(0);
+    expect(readLiveFile(again).notice).toMatch(/0\.0120 SOL/);
+    const journal = fs.readFileSync(path.join(again, "intents.jsonl"), "utf8");
+    expect(journal).toContain("\"kind\":\"sell\"");
+    expect(journal).toContain("sigsell");
+    expect(journal).not.toContain(fs.readFileSync(path.join(again, "wallet.json"), "utf8").slice(0, 24));
   });
 
   it("pushes the open-position snapshot once every 15 minutes and not while the bot is off", async () => {

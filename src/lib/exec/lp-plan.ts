@@ -51,6 +51,22 @@ export function binsBelow(range: number, binStep: number): number | null {
   return bins;
 }
 
+/**
+ * One position at a 2% bin step covers 74%, one point inside the 75% strategy.
+ * Anything shorter is a different bet and stays closed.
+ */
+export const MIN_LIVE_RANGE = 0.74;
+
+/** The range actually placed. Shrinks by at most one point so a 2% pool still fits. */
+export function positionRange(target: number, binStep: number): { range: number; bins: number } | null {
+  const exact = binsBelow(target, binStep);
+  if (exact != null) return { range: target, bins: exact };
+  if (!(target >= MIN_LIVE_RANGE) || target - MIN_LIVE_RANGE > 0.01 + 1e-9) return null;
+  const fitted = binsBelow(MIN_LIVE_RANGE, binStep);
+  if (fitted == null) return null;
+  return { range: MIN_LIVE_RANGE, bins: fitted };
+}
+
 export function openLamports(input: {
   balanceLamports: number;
   reserveLamports: number;
@@ -91,7 +107,7 @@ function toCandidate(pair: RawPair, now: number): LiveCandidate | null {
 }
 
 export function choosePool(candidates: LiveCandidate[], rules: ScreenRules, range: number, busy: Set<string>): LiveCandidate | null {
-  const ready = candidates.filter((pool) => passes(pool, rules) && !busy.has(pool.address) && binsBelow(range, pool.binStep) != null);
+  const ready = candidates.filter((pool) => passes(pool, rules) && !busy.has(pool.address) && positionRange(range, pool.binStep) != null);
   ready.sort((a, b) => b.fees24h / b.tvl - a.fees24h / a.tvl);
   return ready[0] ?? null;
 }
@@ -158,12 +174,12 @@ export function planLiveLp(input: {
     openStakeLamports,
     slot: input.params.slot,
   });
-  if (!pool || lamports <= 0) {
+  const shaped = pool ? positionRange(input.params.range, pool.binStep) : null;
+  if (!pool || !shaped || lamports <= 0) {
     const why = lamports <= 0 ? "El SOL libre no alcanza para una posición y la reserva." : "Ningún pool que pase el filtro cabe en una sola posición con este rango.";
     return { positions, open: null, notice: `${why} No se envió nada.` };
   }
-  const bins = binsBelow(input.params.range, pool.binStep);
-  if (bins == null) return { positions, open: null, notice: "El rango no cabe en una posición. No se envió nada." };
+  const width = shaped.range < input.params.range ? ` al ${Math.round(shaped.range * 100)}%` : "";
   return {
     positions,
     open: {
@@ -172,11 +188,11 @@ export function planLiveLp(input: {
       solIsY: pool.solIsY,
       tokenMint: pool.tokenMint,
       lamports,
-      bins,
+      bins: shaped.bins,
       price: pool.price,
-      range: input.params.range,
+      range: shaped.range,
       binStepBps: binStepBps(pool.binStep) ?? 0,
     },
-    notice: `Abriendo ${pool.name}.`,
+    notice: `Abriendo ${pool.name}${width}.`,
   };
 }

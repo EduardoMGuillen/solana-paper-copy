@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addLog, createBotState, markAccount } from "../bot/engine";
 import { defaultBotSettings } from "../bot/settings";
-import { formatAlerts, formatBalance, formatLiveDigest, formatLiveNotice, liveDigestDue, LIVE_DIGEST_MS, parseLiveCommand, pendingAlerts, pickCloseTarget, readTelegramUpdates, sendTelegram, telegramConfig } from "./telegram";
+import { formatAlerts, formatBalance, formatLiveDigest, formatLiveNotice, formatLiveSell, liveDigestDue, LIVE_DIGEST_MS, parseLiveCommand, pendingAlerts, pickCloseTarget, readTelegramUpdates, sendTelegram, telegramConfig } from "./telegram";
 
 function state() {
   const s = createBotState(0, { ...defaultBotSettings, markets: ["SOL"] }, 100);
@@ -44,6 +44,14 @@ describe("telegram alerts", () => {
     expect(closed).toContain("Cerrada");
     expect(closed).toContain("manual");
     expect(closed).not.toContain("solscan");
+    const sold = formatLiveSell({ name: "pill <SOL>", outSol: 0.012, signature: "sigsell", note: null });
+    expect(sold).toContain("Vendido");
+    expect(sold).toContain("pill &lt;SOL&gt;");
+    expect(sold).toContain("0.0120 SOL");
+    expect(sold).toContain("https://solscan.io/tx/sigsell");
+    const kept = formatLiveSell({ name: "pill-SOL", outSol: null, signature: null, note: "La venta pasaría el tope de impacto." });
+    expect(kept).toContain("impacto");
+    expect(kept).not.toContain("solscan");
   });
 
   it("lists open live positions every 15 minutes and stays quiet about the paper book", () => {

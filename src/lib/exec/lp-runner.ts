@@ -6,12 +6,12 @@
 
 import { randomUUID } from "node:crypto";
 import { listPools } from "../lp/datapi";
-import { formatLiveDigest, formatLiveNotice, liveDigestDue, sendTelegram, telegramConfig } from "../notify/telegram";
+import { formatLiveDigest, formatLiveNotice, formatLiveSell, liveDigestDue, sendTelegram, telegramConfig } from "../notify/telegram";
 import { decoderFilter } from "../lp/meteora";
 import { appendIntent, readIntents, type Intent } from "./intents";
 import type { LivePosition } from "./live-book";
 import { liveCandidates, planLiveLp, type LiveCandidate, type OpenOrder } from "./lp-plan";
-import { liveChain, type LiveChain, type SentOpen } from "./lp-chain";
+import { liveChain, type LiveChain, type SellResult, type SentOpen } from "./lp-chain";
 import { killFile, readLiveFile, readWalletAddress, walletDir, withWallet, writeLiveFile, type LiveFile } from "./wallet";
 
 const STALE_MS = 120_000;
@@ -38,6 +38,56 @@ export async function sendLiveDigest(dir: string, env: Record<string, string | u
   const sent = await notifyLive(env, formatLiveDigest({ now, positions: file.positions, notice: file.notice }));
   if (!sent) return;
   await withWallet(() => writeLiveFile(dir, { ...readLiveFile(dir), digestAt: now }));
+}
+
+async function sellLeftover(dir: string, chain: LiveChain, position: LivePosition, env: Record<string, string | undefined>, now: number): Promise<void> {
+  const id = randomUUID();
+  const base: Intent = {
+    id,
+    at: now,
+    kind: "sell",
+    pool: position.address,
+    name: position.name,
+    position: position.position,
+    lamports: 0,
+    minBinId: position.minBinId,
+    maxBinId: position.maxBinId,
+    solIsY: position.solIsY,
+    tokenMint: position.tokenMint,
+    entryPrice: position.entryPrice,
+    range: position.range,
+    binStepBps: position.binStepBps,
+    status: "pending",
+  };
+  const note = async (text: string) => {
+    await withWallet(() => {
+      const fresh = readLiveFile(dir);
+      writeLiveFile(dir, { ...fresh, notice: text.slice(0, 280) });
+    });
+  };
+  try {
+    appendIntent(dir, base);
+    const result: SellResult = await chain.sell(position, (signature) => appendIntent(dir, { ...base, status: "sent", signature }));
+    if (result.sold) {
+      const outSol = Number(result.outLamports) / 1_000_000_000;
+      appendIntent(dir, { ...base, status: "confirmed", signature: result.signature, lamports: Number(result.outLamports) });
+      await note(`Cerrada ${position.name}. Token vendido por ${outSol.toFixed(4)} SOL.`);
+      await notifyLive(env, formatLiveSell({ name: position.name, outSol, signature: result.signature, note: null }));
+      return;
+    }
+    if (result.reason === "none") {
+      appendIntent(dir, { ...base, status: "confirmed" });
+      return;
+    }
+    appendIntent(dir, { ...base, status: "failed", error: result.reason.slice(0, 280) });
+    await note(`Cerrada ${position.name}. ${result.reason}`);
+    await notifyLive(env, formatLiveSell({ name: position.name, outSol: null, signature: null, note: result.reason }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo vender el token.";
+    appendIntent(dir, { ...base, status: "failed", error: message.slice(0, 280) });
+    await note(`Cerrada ${position.name}. ${message} El token se quedó en la wallet.`);
+    await notifyLive(env, formatLiveSell({ name: position.name, outSol: null, signature: null, note: message }));
+  }
 }
 
 function limits(env: Record<string, string | undefined>) {
@@ -219,6 +269,7 @@ export async function runLiveCycle(
       });
       const realSignature = signature !== "already-closed" ? signature : null;
       await notifyLive(env, formatLiveNotice({ kind: "close", name: position.name, stakeSol: position.stakeSol, signature: realSignature, reason: position.closeReason }));
+      await sellLeftover(dir, chain, position, env, now);
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cerrar.";
       appendIntent(dir, { ...base, status: "failed", error: message.slice(0, 280) });

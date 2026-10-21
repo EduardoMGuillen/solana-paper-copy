@@ -75,6 +75,14 @@ export function formatLiveNotice(event: {
   return `${icon} <b>Meteora live</b> · ${verb} <b>${escapeHtml(event.name)}</b> · ${event.stakeSol.toFixed(4)} SOL${why}${link}`;
 }
 
+/** Result of selling the token left by a live close. `outSol` null means the token stayed. */
+export function formatLiveSell(event: { name: string; outSol: number | null; signature: string | null; note: string | null }): string {
+  if (event.outSol != null && event.signature) {
+    return `🟡 <b>Meteora live</b> · Vendido <b>${escapeHtml(event.name)}</b> · ${event.outSol.toFixed(4)} SOL\n<a href="https://solscan.io/tx/${encodeURIComponent(event.signature)}">Ver en Solscan</a>`;
+  }
+  return `⚠️ <b>Meteora live</b> · Cerrada <b>${escapeHtml(event.name)}</b> · ${escapeHtml(event.note ?? "El token se quedó en la wallet.")}`;
+}
+
 /** How often the open-position snapshot is pushed. Open and close stay immediate. */
 export const LIVE_DIGEST_MS = 15 * 60 * 1000;
 

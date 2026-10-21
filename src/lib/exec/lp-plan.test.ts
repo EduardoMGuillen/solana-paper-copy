@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PAPER_LIVE_PARAMS } from "./live-params";
-import { binsBelow, liveCandidates, openLamports, planLiveLp, type LiveCandidate } from "./lp-plan";
+import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, type LiveCandidate } from "./lp-plan";
 import type { LivePosition } from "./live-book";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
@@ -52,6 +52,10 @@ describe("live open plan", () => {
   it("keeps a 75% range only when it fits one position", () => {
     expect(binsBelow(0.75, 100)).toBeNull();
     expect(binsBelow(0.75, 250)).toBe(57);
+    expect(positionRange(0.75, 250)).toEqual({ range: 0.75, bins: 57 });
+    expect(positionRange(0.75, 200)).toEqual({ range: 0.74, bins: 69 });
+    expect(positionRange(0.75, 100)).toBeNull();
+    expect(positionRange(0.75, 125)).toBeNull();
   });
 
   it("uses a slice of the wallet and leaves the reserve", () => {
@@ -126,6 +130,28 @@ describe("live open plan", () => {
       pendingOpen: false,
     });
     expect(again.open?.pool).toBe(pool);
+  });
+
+  it("opens a 2% pool at 74% and still refuses a 1% pool", () => {
+    const narrow = { ...candidate(100), address: "95zNQQ8juGpu8odzpbp63ZNtXuTnnBeBsHovUjpe32d8", name: "BORDR-SOL", fees24h: 9_000 };
+    const twoPercent = { ...candidate(200), name: "pill-SOL" };
+    const plan = planLiveLp({
+      running: true,
+      kill: false,
+      balanceLamports: 400_000_000,
+      reserveLamports: 30_000_000,
+      maxSol: 0.3,
+      params: PAPER_LIVE_PARAMS,
+      positions: [],
+      candidates: [narrow, twoPercent],
+      prices: {},
+      now: 2_000,
+      pendingOpen: false,
+    });
+    expect(plan.open?.pool).toBe(pool);
+    expect(plan.open?.range).toBe(0.74);
+    expect(plan.open?.bins).toBe(69);
+    expect(plan.notice).toMatch(/74%/);
   });
 
   it("closes on a sudden drop", () => {
