@@ -223,12 +223,12 @@ function botFile(dir: string): string {
   return path.join(dir, "bot.json");
 }
 
-type StoredBot = { running?: unknown; params?: unknown; positions?: unknown; notice?: unknown; blocked?: unknown };
+type StoredBot = { running?: unknown; params?: unknown; positions?: unknown; notice?: unknown; digestAt?: unknown };
 
-export type LiveFile = { running: boolean; params: LiveParams; positions: LivePosition[]; notice: string | null; blocked: string[] };
+export type LiveFile = { running: boolean; params: LiveParams; positions: LivePosition[]; notice: string | null; digestAt: number | null };
 
 function emptyBot(): LiveFile {
-  return { running: false, params: { ...PAPER_LIVE_PARAMS }, positions: [], notice: null, blocked: [] };
+  return { running: false, params: { ...PAPER_LIVE_PARAMS }, positions: [], notice: null, digestAt: null };
 }
 
 let walletQueue: Promise<unknown> = Promise.resolve();
@@ -241,11 +241,6 @@ export function withWallet<T>(fn: () => Promise<T> | T): Promise<T> {
     () => undefined,
   );
   return run;
-}
-
-function parseBlocked(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.filter((item): item is string => typeof item === "string" && item.length >= 32))];
 }
 
 export function readLiveFile(dir: string): LiveFile {
@@ -262,7 +257,7 @@ export function readLiveFile(dir: string): LiveFile {
       params: clampLiveParams(parsed.params),
       positions,
       notice: typeof parsed.notice === "string" ? parsed.notice : null,
-      blocked: parseBlocked(parsed.blocked),
+      digestAt: typeof parsed.digestAt === "number" && parsed.digestAt > 0 ? parsed.digestAt : null,
     };
   } catch {
     return emptyBot();
@@ -316,8 +311,7 @@ export function closeLivePosition(dir: string, address: string, cwd = process.cw
   const current = readLiveFile(dir);
   const result = closeOnePosition(current.positions, address);
   if (!result.found) return { error: "Esa posición no está abierta." };
-  const blocked = current.blocked.includes(address) ? current.blocked : [...current.blocked, address];
-  writeLiveFile(dir, { ...current, positions: result.positions, blocked, notice: "Cierre manual pedido. Ese pool no se vuelve a abrir." });
+  writeLiveFile(dir, { ...current, positions: result.positions, notice: "Cierre manual pedido. Si el pool sigue cumpliendo, se puede volver a abrir." });
   return { error: null };
 }
 

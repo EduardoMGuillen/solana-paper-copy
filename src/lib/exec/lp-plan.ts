@@ -128,7 +128,6 @@ export function planLiveLp(input: {
   maxSol: number;
   params: LiveParams;
   positions: LivePosition[];
-  blocked: string[];
   candidates: LiveCandidate[];
   prices: Record<string, number>;
   now: number;
@@ -147,7 +146,7 @@ export function planLiveLp(input: {
   if (closing || input.pendingOpen) {
     return { positions, open: null, notice: input.pendingOpen ? "Hay una apertura a medias. No se abre otra hasta confirmarla." : "Primero se cierran las que ya pidieron salida." };
   }
-  const busy = new Set([...positions.map((position) => position.address), ...input.blocked]);
+  const busy = new Set(positions.map((position) => position.address));
   const pool = choosePool(input.candidates, input.params, input.params.range, busy);
   const openStakeLamports = positions.filter((position) => !position.closing).reduce((sum, position) => sum + Math.round(position.stakeSol * 1_000_000_000), 0);
   const lamports = openLamports({

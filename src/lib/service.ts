@@ -17,9 +17,10 @@ import { clampBotSettings, PROFILES, type BotSettings, type ProfileId } from "./
 import { toView, type BotView } from "./bot/view";
 import { jupiterConfig } from "./exec/jupiter";
 import { kickLiveLp } from "./exec/lp-runner";
+import { kickTelegramCommands } from "./exec/telegram-control";
 import { applyShadowOutcome, planShadowJobs, runShadowJobs } from "./exec/runner";
 import { emptyShadow } from "./exec/shadow";
-import { formatAlerts, logSeq, pendingAlerts, sendTelegram, telegramConfig } from "./notify/telegram";
+import { sendTelegram, telegramConfig } from "./notify/telegram";
 import { kickMeteoraForward } from "./lp/forward";
 import { loadState, saveState } from "./store";
 
@@ -102,27 +103,6 @@ async function shadow(): Promise<void> {
   });
 }
 
-/** Send pending alert lines to Telegram. On failure they stay pending for the next tick. */
-async function notify(): Promise<void> {
-  const config = telegramConfig();
-  if (!config) return;
-  const batch = await withState((state) => {
-    const lines = pendingAlerts(state);
-    if (lines.length === 0) return null;
-    return { text: formatAlerts(lines, state), seq: Math.max(...lines.map(logSeq)) };
-  });
-  if (!batch) return;
-  try {
-    await sendTelegram(config, batch.text);
-    await withState(async (state) => {
-      state.notifiedSeq = Math.max(state.notifiedSeq ?? 0, batch.seq);
-      await saveState(state);
-    });
-  } catch (error) {
-    console.error("telegram", message(error));
-  }
-}
-
 /**
  * One pass over every market. Network calls happen outside the state lock;
  * results are applied inside it, so the dashboard never waits on Binance.
@@ -188,9 +168,9 @@ export async function tick(): Promise<void> {
       await saveState(state);
     });
     await shadow();
-    await notify();
     kickMeteoraForward();
     kickLiveLp();
+    kickTelegramCommands();
   } finally {
     g.__botTicking = false;
   }
@@ -236,7 +216,7 @@ export function runAction(body: ActionBody): Promise<{ ok: true; view: BotView }
       if (!config) error = "Telegram no está configurado: falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID.";
       else {
         try {
-          await sendTelegram(config, "<b>🤖 Bot Solana</b>\n✅ Alertas funcionando. Te avisaré de compras, ventas, cortes de riesgo y un resumen diario.");
+          await sendTelegram(config, "<b>Meteora live</b>\nAvisos conectados. Te aviso cuando se abra o se cierre una posición.");
         } catch (e) {
           error = message(e);
         }

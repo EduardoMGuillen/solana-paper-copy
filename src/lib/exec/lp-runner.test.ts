@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readIntents } from "./intents";
 import type { LiveCandidate } from "./lp-plan";
-import { runLiveCycle } from "./lp-runner";
+import { runLiveCycle, sendLiveDigest } from "./lp-runner";
 import type { LiveChain } from "./lp-chain";
-import { createDedicatedWallet, readLiveFile, setLiveBot } from "./wallet";
+import { closeLivePosition, createDedicatedWallet, readLiveFile, setLiveBot } from "./wallet";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
 const dirs: string[] = [];
@@ -18,6 +18,7 @@ function tempDir(): string {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -101,5 +102,46 @@ describe("live cycle", () => {
     expect(calls).toEqual(["open", "close"]);
     expect(readLiveFile(dir).running).toBe(false);
     expect(readLiveFile(dir).positions).toHaveLength(0);
+  });
+
+  it("opens the same pool again after a manual close once it still qualifies", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const used = chain(2_000_000_000, calls);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    expect(closeLivePosition(dir, pool).error).toBeNull();
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 30_000);
+    expect(calls).toEqual(["open", "close", "open"]);
+    expect(readLiveFile(dir).running).toBe(true);
+    expect(readLiveFile(dir).positions).toHaveLength(1);
+  });
+
+  it("pushes the open-position snapshot once every 15 minutes and not while the bot is off", async () => {
+    const env = { TELEGRAM_BOT_TOKEN: "SECRET", TELEGRAM_CHAT_ID: "42" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const off = tempDir();
+    createDedicatedWallet(off);
+    await sendLiveDigest(off, env, 1_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(readLiveFile(off).digestAt).toBeNull();
+
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    await sendLiveDigest(dir, env, 1_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { text: string };
+    expect(body.text).toContain("0 abiertas");
+    expect(body.text).not.toContain("SECRET");
+    expect(readLiveFile(dir).digestAt).toBe(1_000);
+    await sendLiveDigest(dir, env, 1_000 + 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await sendLiveDigest(dir, env, 1_000 + 15 * 60 * 1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readLiveFile(dir).digestAt).toBe(1_000 + 15 * 60 * 1000);
   });
 });

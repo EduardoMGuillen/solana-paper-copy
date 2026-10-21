@@ -85,7 +85,6 @@ describe("live open plan", () => {
       maxSol: 0.3,
       params: PAPER_LIVE_PARAMS,
       positions: [position()],
-      blocked: [],
       candidates: [candidate(250)],
       prices: { [pool]: 0.001 },
       now: 2_000,
@@ -96,7 +95,7 @@ describe("live open plan", () => {
     expect(plan.positions[0]?.closeReason).toBe("stop");
   });
 
-  it("opens the pool that fits and skips one that was closed by hand", () => {
+  it("opens the pool that fits and can open it again after it is closed", () => {
     const wide = { ...candidate(100), address: "95zNQQ8juGpu8odzpbp63ZNtXuTnnBeBsHovUjpe32d8", name: "WIDE-SOL", fees24h: 9_000 };
     const plan = planLiveLp({
       running: true,
@@ -106,7 +105,6 @@ describe("live open plan", () => {
       maxSol: 0.3,
       params: PAPER_LIVE_PARAMS,
       positions: [],
-      blocked: [],
       candidates: [wide, candidate(250)],
       prices: {},
       now: 2_000,
@@ -122,13 +120,12 @@ describe("live open plan", () => {
       maxSol: 0.3,
       params: PAPER_LIVE_PARAMS,
       positions: [],
-      blocked: [pool],
       candidates: [candidate(250)],
       prices: {},
       now: 2_000,
       pendingOpen: false,
     });
-    expect(again.open).toBeNull();
+    expect(again.open?.pool).toBe(pool);
   });
 
   it("closes on a sudden drop", () => {
@@ -141,7 +138,6 @@ describe("live open plan", () => {
       maxSol: 0.3,
       params: PAPER_LIVE_PARAMS,
       positions: [open],
-      blocked: [],
       candidates: [candidate(250)],
       prices: { [pool]: 0.0007 },
       now: 2_000,

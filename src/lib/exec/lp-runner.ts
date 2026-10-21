@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { listPools } from "../lp/datapi";
+import { formatLiveDigest, formatLiveNotice, liveDigestDue, sendTelegram, telegramConfig } from "../notify/telegram";
 import { decoderFilter } from "../lp/meteora";
 import { appendIntent, readIntents, type Intent } from "./intents";
 import type { LivePosition } from "./live-book";
@@ -14,6 +15,30 @@ import { liveChain, type LiveChain, type SentOpen } from "./lp-chain";
 import { killFile, readLiveFile, readWalletAddress, walletDir, withWallet, writeLiveFile, type LiveFile } from "./wallet";
 
 const STALE_MS = 120_000;
+
+async function notifyLive(env: Record<string, string | undefined>, text: string): Promise<boolean> {
+  const config = telegramConfig(env);
+  if (!config) return false;
+  try {
+    await sendTelegram(config, text);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Telegram no respondió";
+    console.error("telegram live", message);
+    return false;
+  }
+}
+
+/** One snapshot of the open live positions. Skipped when the bot is off and flat. */
+export async function sendLiveDigest(dir: string, env: Record<string, string | undefined>, now: number): Promise<void> {
+  const file = await withWallet(() => readLiveFile(dir));
+  if (!liveDigestDue(file.digestAt, now)) return;
+  if (!file.running && file.positions.length === 0) return;
+  if (!telegramConfig(env)) return;
+  const sent = await notifyLive(env, formatLiveDigest({ now, positions: file.positions, notice: file.notice }));
+  if (!sent) return;
+  await withWallet(() => writeLiveFile(dir, { ...readLiveFile(dir), digestAt: now }));
+}
 
 function limits(env: Record<string, string | undefined>) {
   const reserve = Number(env.LIVE_MIN_SOL_RESERVE);
@@ -145,7 +170,6 @@ export async function runLiveCycle(
     maxSol: cap.maxSol,
     params: file.params,
     positions: file.positions,
-    blocked: file.blocked,
     candidates: listed,
     prices,
     now,
@@ -193,6 +217,8 @@ export async function runLiveCycle(
           notice: `Cerrada ${position.name}.`,
         });
       });
+      const realSignature = signature !== "already-closed" ? signature : null;
+      await notifyLive(env, formatLiveNotice({ kind: "close", name: position.name, stakeSol: position.stakeSol, signature: realSignature, reason: position.closeReason }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo cerrar.";
       appendIntent(dir, { ...base, status: "failed", error: message.slice(0, 280) });
@@ -232,6 +258,7 @@ export async function runLiveCycle(
         notice: `Abierta ${opened.name} con ${opened.stakeSol.toFixed(4)} SOL.`,
       });
     });
+    await notifyLive(env, formatLiveNotice({ kind: "open", name: order.name, stakeSol: order.lamports / 1_000_000_000, signature: sent.signature }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo abrir.";
     appendIntent(dir, { ...pending, status: "failed", error: message.slice(0, 280) });
@@ -250,6 +277,7 @@ export function kickLiveLp(now = Date.now()): void {
       const message = error instanceof Error ? error.message : "Error del bot live";
       console.error("meteora live", message);
     })
+    .then(() => sendLiveDigest(dir, process.env, now))
     .finally(() => {
       pending = null;
     });

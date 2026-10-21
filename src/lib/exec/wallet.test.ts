@@ -192,7 +192,7 @@ describe("live window status", () => {
       "utf8",
     );
     expect(closeLivePosition(dir, pool).error).toBeNull();
-    expect(JSON.parse(fs.readFileSync(path.join(dir, "bot.json"), "utf8")).blocked).toContain(pool);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "bot.json"), "utf8")).notice).toMatch(/se puede volver a abrir/);
     const afterOne = await walletStatus({ WALLET_DIR: dir }, async () => ({ ok: true, json: async () => ({ result: { value: 0 } }) }));
     expect(afterOne.running).toBe(true);
     expect(afterOne.positions.find((position) => position.address === pool)?.closeReason).toBe("manual");
