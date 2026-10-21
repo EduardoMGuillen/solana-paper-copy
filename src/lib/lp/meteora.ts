@@ -4,24 +4,30 @@ import { bidAskBins, bidAskValue, lowerEdge, type BidAskShape } from "./bidask";
  * Meteora DLMM pool screening and a forward paper test of a Decoder-Farmer
  * style position (SOL-only Bid-Ask below the entry price).
  *
- * Field names follow the documented `GET https://dlmm-api.meteora.ag/pair/all`
- * pair object. Parsing is defensive: unknown or missing fields drop the pool
- * instead of crashing the collector.
+ * Field names accept both the retired `dlmm-api` pair object and the current
+ * Data API pool (`dlmm.datapi.meteora.ag/pools`). Parsing is defensive:
+ * unknown or missing fields drop the pool instead of crashing the collector.
  */
 
 export const METEORA_API = process.env.METEORA_API_URL || "https://dlmm-api.meteora.ag";
 export const WSOL = "So11111111111111111111111111111111111111112";
 
-type Windowed = Partial<Record<"min_30" | "hour_1" | "hour_2" | "hour_4" | "hour_12" | "hour_24", number>>;
+type Windowed = Partial<
+  Record<"min_30" | "hour_1" | "hour_2" | "hour_4" | "hour_12" | "hour_24" | "30m" | "1h" | "2h" | "4h" | "12h" | "24h", number>
+>;
 
 export type RawPair = {
   address?: string;
   name?: string;
   mint_x?: string;
   mint_y?: string;
+  token_x?: { address?: string };
+  token_y?: { address?: string };
   bin_step?: number;
+  pool_config?: { bin_step?: number; base_fee_pct?: number };
   base_fee_percentage?: string | number;
   liquidity?: string | number;
+  tvl?: number;
   current_price?: number;
   fees_24h?: number;
   trade_volume_24h?: number;
@@ -53,6 +59,17 @@ const num = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
 
+/** First finite number, checking the legacy key and then the Data API key. */
+function bucket(source: Windowed | undefined, legacy: keyof Windowed, current: keyof Windowed): number {
+  const fromLegacy = num(source?.[legacy]);
+  if (Number.isFinite(fromLegacy)) return fromLegacy;
+  return num(source?.[current]);
+}
+
+function firstFinite(...values: number[]): number {
+  return values.find((value) => Number.isFinite(value)) ?? Number.NaN;
+}
+
 export function parsePairs(body: unknown): RawPair[] {
   if (Array.isArray(body)) return body as RawPair[];
   if (body && typeof body === "object") {
@@ -67,8 +84,10 @@ export function parsePairs(body: unknown): RawPair[] {
 /** SOL-quoted, visible pools only, normalized so price is SOL per token. */
 export function toSnap(pair: RawPair, t: number): PoolSnap | null {
   if (pair.hide || pair.is_blacklisted || !pair.address) return null;
-  const solIsY = pair.mint_y === WSOL;
-  const solIsX = pair.mint_x === WSOL;
+  const mintX = pair.mint_x ?? pair.token_x?.address;
+  const mintY = pair.mint_y ?? pair.token_y?.address;
+  const solIsY = mintY === WSOL;
+  const solIsX = mintX === WSOL;
   if (!solIsX && !solIsY) return null;
   const raw = num(pair.current_price);
   const price = solIsY ? raw : 1 / raw;
@@ -77,13 +96,13 @@ export function toSnap(pair: RawPair, t: number): PoolSnap | null {
     address: pair.address,
     name: pair.name ?? pair.address.slice(0, 6),
     price,
-    tvl: num(pair.liquidity),
-    binStep: num(pair.bin_step),
-    baseFeePct: num(pair.base_fee_percentage),
-    fees1h: num(pair.fees?.hour_1),
-    fees24h: num(pair.fees_24h ?? pair.fees?.hour_24),
-    volume1h: num(pair.volume?.hour_1),
-    volume24h: num(pair.trade_volume_24h ?? pair.volume?.hour_24),
+    tvl: num(pair.liquidity ?? pair.tvl),
+    binStep: num(pair.bin_step ?? pair.pool_config?.bin_step),
+    baseFeePct: num(pair.base_fee_percentage ?? pair.pool_config?.base_fee_pct),
+    fees1h: bucket(pair.fees, "hour_1", "1h"),
+    fees24h: firstFinite(num(pair.fees_24h), bucket(pair.fees, "hour_24", "24h")),
+    volume1h: bucket(pair.volume, "hour_1", "1h"),
+    volume24h: firstFinite(num(pair.trade_volume_24h), bucket(pair.volume, "hour_24", "24h")),
   };
   if (!(snap.price > 0) || !(snap.tvl > 0)) return null;
   return snap;
@@ -98,6 +117,11 @@ export type ScreenRules = {
 };
 
 export const DECODER_RULES: ScreenRules = { minTvl: 10_000, minFees24h: 1_000, minBaseFeePct: 1, minVolume1h: 10_000 };
+
+/** Data API filter equivalent to `DECODER_RULES`, plus the public blacklist flag. */
+export function decoderFilter(rules: ScreenRules = DECODER_RULES): string {
+  return `tvl>=${rules.minTvl}&&fee_24h>=${rules.minFees24h}&&fee_pct>=${rules.minBaseFeePct}&&volume_1h>=${rules.minVolume1h}&&is_blacklisted=false`;
+}
 
 export function passes(snap: PoolSnap, rules: ScreenRules): boolean {
   return (
@@ -134,7 +158,7 @@ export type LpTrade = {
   fees: number;
   mark: number;
   result: number;
-  reason: "tiempo" | "take-profit" | "stop" | "fuera de rango";
+  reason: "tiempo" | "take-profit" | "stop" | "fuera de rango" | "manual";
 };
 
 /**

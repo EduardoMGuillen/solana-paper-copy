@@ -1,5 +1,6 @@
 /**
  * Meteora DLMM research (run on the VM or at home; some networks block meteora.ag).
+ * Pool lists come from the DLMM Data API (`dlmm.datapi.meteora.ag`).
  *
  *   npm run meteora -- scan       # current SOL pools: fee/TVL distribution and the top candidates
  *   npm run meteora -- collect    # append one snapshot to data/meteora/YYYY-MM-DD.jsonl (the VM runs it every 15 min)
@@ -8,15 +9,13 @@
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DECODER_SHAPE } from "../src/lib/lp/bidask";
+import { fetchCurrentSnaps } from "../src/lib/lp/datapi";
 import {
   DECODER_EXITS,
   DECODER_RULES,
   feeTvl24h,
   forwardTest,
-  METEORA_API,
-  parsePairs,
   passes,
-  toSnap,
   type PoolSnap,
 } from "../src/lib/lp/meteora";
 import { dataDir } from "../src/lib/paths";
@@ -25,12 +24,7 @@ const dir = path.join(dataDir(), "meteora");
 const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
 
 async function fetchSnaps(): Promise<PoolSnap[]> {
-  const response = await fetch(`${METEORA_API}/pair/all`, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`Meteora respondió ${response.status}`);
-  const t = Date.now();
-  return parsePairs(await response.json())
-    .map((pair) => toSnap(pair, t))
-    .filter((snap): snap is PoolSnap => snap !== null);
+  return fetchCurrentSnaps();
 }
 
 async function scan() {

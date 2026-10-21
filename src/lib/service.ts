@@ -19,6 +19,7 @@ import { jupiterConfig } from "./exec/jupiter";
 import { applyShadowOutcome, planShadowJobs, runShadowJobs } from "./exec/runner";
 import { emptyShadow } from "./exec/shadow";
 import { formatAlerts, logSeq, pendingAlerts, sendTelegram, telegramConfig } from "./notify/telegram";
+import { kickMeteoraForward } from "./lp/forward";
 import { loadState, saveState } from "./store";
 
 const POLL_MS = 30_000;
@@ -187,6 +188,7 @@ export async function tick(): Promise<void> {
     });
     await shadow();
     await notify();
+    kickMeteoraForward();
   } finally {
     g.__botTicking = false;
   }

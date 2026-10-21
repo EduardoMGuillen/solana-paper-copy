@@ -45,6 +45,24 @@ describe("meteora parsing", () => {
     expect(toSnap({ ...pair, mint_y: "USDC111" }, 0)).toBeNull();
     expect(toSnap({ ...pair, is_blacklisted: true }, 0)).toBeNull();
   });
+
+  it("reads the current Data API pool shape", () => {
+    const snap = toSnap(
+      {
+        address: "Pool222",
+        name: "MEME-SOL",
+        token_x: { address: "Meme111" },
+        token_y: { address: WSOL },
+        pool_config: { bin_step: 80, base_fee_pct: 2 },
+        tvl: 40_000,
+        current_price: 0.002,
+        fees: { "1h": 100, "24h": 2_400 },
+        volume: { "1h": 11_000, "24h": 200_000 },
+      },
+      5,
+    );
+    expect(snap).toMatchObject({ price: 0.002, tvl: 40_000, binStep: 80, baseFeePct: 2, fees1h: 100, fees24h: 2_400, volume1h: 11_000 });
+  });
 });
 
 function path(prices: number[], fees1h = 250): PoolSnap[] {

@@ -27,7 +27,8 @@ export function LineChart<T extends Point>({
   const ready = values.length >= 2 && values.every((value) => Number.isFinite(value));
   const width = 640;
   const pad = 16;
-  const ys = ready ? values : [0, 1];
+  // Copy: pushing the baseline into `values` would draw an extra point at zero.
+  const ys = ready ? [...values] : [0, 1];
   if (baseline !== undefined && Number.isFinite(baseline)) ys.push(baseline);
   const min = Math.min(...ys);
   const max = Math.max(...ys);

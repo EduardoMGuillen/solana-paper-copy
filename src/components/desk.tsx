@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Pause, Play, RefreshCw, RotateCcw, Send } from "lucide-react";
+import { ExperimentBalances } from "@/components/balances";
+import { DeskNav } from "@/components/nav";
+import { tradesBalanceSol } from "@/lib/bot/balances";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -153,13 +156,15 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
       <header className="sticky top-0 z-20 -mx-4 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
-            <p className="text-xs tracking-[0.18em] text-muted-foreground uppercase">Solana · análisis técnico · papel</p>
+            <DeskNav />
+            <p className="mt-2 text-xs tracking-[0.18em] text-muted-foreground uppercase">Solana · análisis técnico · papel</p>
             <h1 className="text-2xl font-semibold tracking-tight">Bot de estrategia</h1>
             <p className="max-w-xl text-sm text-muted-foreground">{view?.disclaimer ?? "Cargando…"}</p>
+            <ExperimentBalances tradesSol={account ? tradesBalanceSol(account) : null} />
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-5">
             <Tape label="Patrimonio" value={account ? money(account.equity) : "—"} />
-            <Tape label="En SOL" value={account ? sol(account.equitySol) : "—"} className={account && account.equitySol !== null ? tone(account.equitySol - account.startingSol) : ""} />
+            <Tape label="Saldo trades" value={account ? sol(tradesBalanceSol(account)) : "—"} />
             <Tape label="Retorno US$" value={account ? pct(account.totalReturn, true) : "—"} className={account ? tone(account.totalReturn) : ""} />
             <Tape label="Hoy" value={account ? money(account.dayPnl, true) : "—"} className={account ? tone(account.dayPnl) : ""} />
             <Tape label="Abiertas" value={account ? String(account.open) : "—"} />
@@ -179,7 +184,7 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
         <p className="mt-2 min-h-5 text-sm text-muted-foreground" aria-live="polite">
           {view?.halt.reason ??
             (view
-              ? `Operando ${view.markets.length} mercados en velas de ${view.settings.interval}. Decide al cierre de cada vela; el servidor sigue aunque cierres esta pestaña.`
+              ? `Operando ${view.markets.length} mercados en velas de ${view.settings.interval}. El sol de trades se reparte entre esos mercados; el de Meteora es otro. Decide al cierre de cada vela; el servidor sigue aunque cierres esta pestaña.`
               : "Cargando el bot…")}
         </p>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -201,8 +206,13 @@ export function Desk({ initialView = null }: { initialView?: BotView | null }) {
             <CardContent className="flex flex-col gap-4">
               <div className="grid gap-3 rounded-lg border border-border bg-background/50 p-3 text-sm sm:grid-cols-3">
                 <div>
-                  <p className="text-muted-foreground">Bot</p>
-                  <p className="num text-lg">{money(account.equity)} · {sol(account.equitySol)}</p>
+                  <p className="text-muted-foreground">Bot · solo este experimento</p>
+                  <p className="num text-lg">{money(account.equity)} · {sol(tradesBalanceSol(account))}</p>
+                  {account.closed === 0 && account.open === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Sin operaciones: el depósito sigue en {sol(account.startingSol)}. La caja quedó en dólares del arranque ({money(account.startingEquity)}). SOL ahora vale {money(account.solPrice)}, así que ese mismo dinero parecía {sol(account.equitySol)}. No se gastó.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <p className="text-muted-foreground">Si solo hubieras mantenido {account.startingSol} SOL</p>
