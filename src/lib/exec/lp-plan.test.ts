@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PAPER_LIVE_PARAMS } from "./live-params";
-import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, type LiveCandidate } from "./lp-plan";
+import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, positionValue, solPerToken, type LiveCandidate, type PositionMark } from "./lp-plan";
 import type { LivePosition } from "./live-book";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
@@ -90,7 +90,7 @@ describe("live open plan", () => {
       params: PAPER_LIVE_PARAMS,
       positions: [position()],
       candidates: [candidate(250)],
-      prices: { [pool]: 0.001 },
+      marks: { [pool]: { exists: true, valueLamports: 100_000_000, price: 0.001 } },
       now: 2_000,
       pendingOpen: false,
     });
@@ -110,7 +110,7 @@ describe("live open plan", () => {
       params: PAPER_LIVE_PARAMS,
       positions: [],
       candidates: [wide, candidate(250)],
-      prices: {},
+      marks: {},
       now: 2_000,
       pendingOpen: false,
     });
@@ -125,7 +125,7 @@ describe("live open plan", () => {
       params: PAPER_LIVE_PARAMS,
       positions: [],
       candidates: [candidate(250)],
-      prices: {},
+      marks: {},
       now: 2_000,
       pendingOpen: false,
     });
@@ -144,7 +144,7 @@ describe("live open plan", () => {
       params: PAPER_LIVE_PARAMS,
       positions: [],
       candidates: [narrow, twoPercent],
-      prices: {},
+      marks: {},
       now: 2_000,
       pendingOpen: false,
     });
@@ -165,12 +165,81 @@ describe("live open plan", () => {
       params: PAPER_LIVE_PARAMS,
       positions: [open],
       candidates: [candidate(250)],
-      prices: { [pool]: 0.0007 },
+      marks: { [pool]: { exists: true, valueLamports: 95_000_000, price: 0.0007 } },
       now: 2_000,
       pendingOpen: false,
     });
     expect(plan.open).toBeNull();
     expect(plan.positions[0]?.closeReason).toBe("rug");
+  });
+
+  function markOne(mark: PositionMark | undefined, now = 2_000, extra: Partial<LivePosition> = {}) {
+    return planLiveLp({
+      running: true,
+      kill: false,
+      balanceLamports: 2_000_000_000,
+      reserveLamports: 30_000_000,
+      maxSol: 0.3,
+      params: PAPER_LIVE_PARAMS,
+      positions: [{ ...position(), ...extra }],
+      candidates: [],
+      marks: mark ? { [pool]: mark } : {},
+      now,
+      pendingOpen: false,
+    }).positions[0];
+  }
+
+  it("takes profit on the on-chain value, fees included", () => {
+    const marked = markOne({ exists: true, valueLamports: 108_500_000, price: 0.00099 });
+    expect(marked?.closeReason).toBe("take-profit");
+    expect(marked?.positionPct).toBeCloseTo(0.085);
+    expect(marked?.tokenPct).toBeCloseTo(-0.01);
+  });
+
+  it("stops on the on-chain value", () => {
+    const marked = markOne({ exists: true, valueLamports: 79_000_000, price: 0.00085 }, 2_000, { lastPrice: 0.0009 });
+    expect(marked?.closeReason).toBe("loss");
+  });
+
+  it("keeps a position open without a read and fires only the time exit", () => {
+    const unread = markOne(undefined);
+    expect(unread?.closing).toBe(false);
+    expect(unread?.note).toMatch(/No se pudo leer/);
+    const late = markOne(undefined, 1_000 + PAPER_LIVE_PARAMS.holdHours * 3_600_000);
+    expect(late?.closeReason).toBe("time");
+  });
+
+  it("closes the record when the position account is gone", () => {
+    expect(markOne({ exists: false, valueLamports: 0, price: 0 })?.closeReason).toBe("gone");
+  });
+
+  it("does not open a pool that sits out after a failed open", () => {
+    const plan = planLiveLp({
+      running: true,
+      kill: false,
+      balanceLamports: 2_000_000_000,
+      reserveLamports: 30_000_000,
+      maxSol: 0.3,
+      params: PAPER_LIVE_PARAMS,
+      positions: [],
+      candidates: [candidate(250)],
+      marks: {},
+      skipped: { [pool]: 5_000 },
+      now: 2_000,
+      pendingOpen: false,
+    });
+    expect(plan.open).toBeNull();
+  });
+
+  it("values a position in SOL from either side of the pair", () => {
+    expect(solPerToken(0.002, true)).toBe(0.002);
+    expect(solPerToken(500, false)).toBeCloseTo(0.002);
+    expect(solPerToken(0, true)).toBe(0);
+    // 0.05 SOL + 10 tokens (6 decimals) at 0.002 SOL + fees of 0.001 SOL and 1 token.
+    const solY = positionValue({ solIsY: true, totalX: 10_000_000, totalY: 50_000_000, feeX: 1_000_000, feeY: 1_000_000, tokenDecimals: 6, solPerToken: 0.002 });
+    expect(solY).toBe(51_000_000 + 22_000_000);
+    const solX = positionValue({ solIsY: false, totalX: 50_000_000, totalY: 10_000_000, feeX: 0, feeY: 0, tokenDecimals: 6, solPerToken: 0.002 });
+    expect(solX).toBe(50_000_000 + 20_000_000);
   });
 
   it("reads which side is SOL from the pair", () => {

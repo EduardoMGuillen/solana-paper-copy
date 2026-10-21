@@ -6,6 +6,9 @@
 /** Below this SOL out, the swap costs more than the token is worth. */
 export const MIN_SELL_LAMPORTS = 1_000_000;
 
+/** A leftover this small is dropped instead of retried. */
+export const DUST_SELL_REASON = "El token que quedó no paga la venta. Se quedó en la wallet.";
+
 export function impactTooHigh(priceImpactPercent: number, maxImpactBps: number): boolean {
   if (!Number.isFinite(priceImpactPercent) || priceImpactPercent < 0) return true;
   if (!Number.isFinite(maxImpactBps) || maxImpactBps < 0) return true;
@@ -26,7 +29,7 @@ export function decideSell(input: {
     return { sell: false, reason: "La venta pasaría el tope de impacto. El token se quedó en la wallet." };
   }
   if (input.outLamports < BigInt(MIN_SELL_LAMPORTS)) {
-    return { sell: false, reason: "El token que quedó no paga la venta. Se quedó en la wallet." };
+    return { sell: false, reason: DUST_SELL_REASON };
   }
   return { sell: true };
 }

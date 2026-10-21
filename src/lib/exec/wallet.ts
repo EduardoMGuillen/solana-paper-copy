@@ -3,8 +3,7 @@
  *
  * The dashboard and the API read only `wallet.address`. They never open
  * `wallet.json`. Nothing in this module signs or sends a transaction:
- * paper trading stays on its own pages, and Meteora live only displays
- * the public address and the on-chain SOL balance.
+ * only `lp-chain.ts` opens the key, and only for Meteora live.
  */
 
 import { createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
@@ -223,12 +222,59 @@ function botFile(dir: string): string {
   return path.join(dir, "bot.json");
 }
 
-type StoredBot = { running?: unknown; params?: unknown; positions?: unknown; notice?: unknown; digestAt?: unknown };
+type StoredBot = {
+  running?: unknown;
+  params?: unknown;
+  positions?: unknown;
+  notice?: unknown;
+  digestAt?: unknown;
+  skipped?: unknown;
+  leftovers?: unknown;
+};
 
-export type LiveFile = { running: boolean; params: LiveParams; positions: LivePosition[]; notice: string | null; digestAt: number | null };
+/** Token left in the wallet by a close whose sale back to SOL did not go through. */
+export type Leftover = { pool: string; name: string; tokenMint: string; solIsY: boolean; since: number; triedAt: number };
+
+export type LiveFile = {
+  running: boolean;
+  params: LiveParams;
+  positions: LivePosition[];
+  notice: string | null;
+  digestAt: number | null;
+  /** Pool address → time until which it may not be opened again. */
+  skipped: Record<string, number>;
+  leftovers: Leftover[];
+};
 
 function emptyBot(): LiveFile {
-  return { running: false, params: { ...PAPER_LIVE_PARAMS }, positions: [], notice: null, digestAt: null };
+  return { running: false, params: { ...PAPER_LIVE_PARAMS }, positions: [], notice: null, digestAt: null, skipped: {}, leftovers: [] };
+}
+
+function parseSkipped(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [address, until] of Object.entries(raw as Record<string, unknown>)) {
+    if (address.length >= 32 && typeof until === "number" && until > 0) out[address] = until;
+  }
+  return out;
+}
+
+function parseLeftovers(raw: unknown): Leftover[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const item = row as Record<string, unknown>;
+    if (typeof item.pool !== "string" || item.pool.length < 32 || typeof item.tokenMint !== "string" || item.tokenMint.length < 32) return [];
+    const since = typeof item.since === "number" && item.since > 0 ? item.since : 0;
+    return [{
+      pool: item.pool,
+      name: typeof item.name === "string" && item.name ? item.name : item.pool.slice(0, 6),
+      tokenMint: item.tokenMint,
+      solIsY: item.solIsY !== false,
+      since,
+      triedAt: typeof item.triedAt === "number" && item.triedAt > 0 ? item.triedAt : since,
+    }];
+  });
 }
 
 let walletQueue: Promise<unknown> = Promise.resolve();
@@ -258,15 +304,21 @@ export function readLiveFile(dir: string): LiveFile {
       positions,
       notice: typeof parsed.notice === "string" ? parsed.notice : null,
       digestAt: typeof parsed.digestAt === "number" && parsed.digestAt > 0 ? parsed.digestAt : null,
+      skipped: parseSkipped(parsed.skipped),
+      leftovers: parseLeftovers(parsed.leftovers),
     };
   } catch {
     return emptyBot();
   }
 }
 
+/** Write then rename, so a crash mid-write cannot leave a torn book that reads as empty. */
 export function writeLiveFile(dir: string, bot: LiveFile): void {
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(botFile(dir), JSON.stringify(bot), "utf8");
+  const target = botFile(dir);
+  const temp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(bot), "utf8");
+  fs.renameSync(temp, target);
 }
 
 export function killFile(dir: string): boolean {

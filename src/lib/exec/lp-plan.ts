@@ -3,7 +3,6 @@
  * No network and no keys: the runner asks the chain only for what this returns.
  */
 
-import { bidAskBins, bidAskValue } from "../lp/bidask";
 import { passes, toSnap, WSOL, type PoolSnap, type RawPair, type ScreenRules } from "../lp/meteora";
 import { keepOnePoolPerName } from "../lp/history";
 import type { LiveParams } from "./live-params";
@@ -17,6 +16,46 @@ export const OPEN_FEE_LAMPORTS = 5_000_000;
 export const MIN_OPEN_LAMPORTS = 10_000_000;
 
 export type LiveCandidate = PoolSnap & { solIsY: boolean; tokenMint: string };
+
+/**
+ * What the chain says one open position is worth right now.
+ * `valueLamports` is the SOL in the position plus its token and unclaimed fees
+ * at the active-bin price. `price` is SOL per token at that bin.
+ */
+export type PositionMark = { exists: boolean; valueLamports: number; price: number };
+
+/** A pool whose open failed before anything was signed sits out this long. */
+export const SKIP_POOL_MS = 6 * 3_600_000;
+
+/** Rent of one DLMM bin array (SDK `BIN_ARRAY_FEE`). Paid by whoever creates it and never returned. */
+export const BIN_ARRAY_RENT_LAMPORTS = 71_437_440;
+
+/** The open is refused when the on-chain price is this far from the screened price. */
+export const MAX_OPEN_PRICE_DRIFT = 0.1;
+
+/** `pricePerToken` from the SDK is X priced in Y. Returns SOL per token either way. */
+export function solPerToken(pricePerToken: number, solIsY: boolean): number {
+  if (!(pricePerToken > 0) || !Number.isFinite(pricePerToken)) return 0;
+  return solIsY ? pricePerToken : 1 / pricePerToken;
+}
+
+/** Lamports a position is worth: its SOL, plus its token and unclaimed fees at `solPerToken`. */
+export function positionValue(input: {
+  solIsY: boolean;
+  totalX: number;
+  totalY: number;
+  feeX: number;
+  feeY: number;
+  tokenDecimals: number;
+  solPerToken: number;
+}): number {
+  const x = (input.totalX || 0) + (input.feeX || 0);
+  const y = (input.totalY || 0) + (input.feeY || 0);
+  const solRaw = input.solIsY ? y : x;
+  const tokenRaw = input.solIsY ? x : y;
+  const tokenValue = input.solPerToken > 0 ? (tokenRaw / 10 ** input.tokenDecimals) * input.solPerToken * 1_000_000_000 : 0;
+  return solRaw + tokenValue;
+}
 
 export type OpenOrder = {
   pool: string;
@@ -112,25 +151,26 @@ export function choosePool(candidates: LiveCandidate[], rules: ScreenRules, rang
   return ready[0] ?? null;
 }
 
-function markAt(position: LivePosition, price: number | undefined, pool: LiveCandidate | undefined, now: number, params: LiveParams): LivePosition {
+/**
+ * Exits use the position's on-chain value, fees included. Without a read only
+ * the time exit can fire: a stop or take-profit never runs on a guess.
+ */
+function markAt(position: LivePosition, mark: PositionMark | undefined, now: number, params: LiveParams): LivePosition {
   if (position.closing) return position;
-  const entry = position.entryPrice;
-  const next: LivePosition = { ...position, lastPrice: price && price > 0 ? price : position.lastPrice };
   if (now - position.openedAt >= params.holdHours * 3_600_000) {
-    return { ...next, closing: true, closeReason: "time", note: "Se cumplió el tiempo. Cerrando." };
+    return { ...position, closing: true, closeReason: "time", note: "Se cumplió el tiempo. Cerrando." };
   }
-  if (!(entry && price && price > 0)) return next;
-  if (position.lastPrice && price / position.lastPrice <= 0.8) {
-    return { ...next, closing: true, closeReason: "rug", note: "El precio cayó de golpe. Cerrando." };
+  if (!mark) return { ...position, note: "No se pudo leer la posición en la cadena. Solo corre el cierre por tiempo." };
+  if (!mark.exists) return { ...position, closing: true, closeReason: "gone", note: "La posición ya no está en la cadena." };
+  const price = mark.price > 0 ? mark.price : null;
+  const stake = position.stakeSol * 1_000_000_000;
+  const positionPct = stake > 0 && Number.isFinite(mark.valueLamports) ? mark.valueLamports / stake - 1 : null;
+  const tokenPct = price && position.entryPrice ? price / position.entryPrice - 1 : null;
+  const marked: LivePosition = { ...position, lastPrice: price ?? position.lastPrice, tokenPct, positionPct, note: "" };
+  if (price && position.lastPrice && price / position.lastPrice <= 0.8) {
+    return { ...marked, closing: true, closeReason: "rug", note: "El precio cayó de golpe. Cerrando." };
   }
-  const step = position.binStepBps != null ? position.binStepBps / 10_000 : params.binStep;
-  const range = position.range ?? params.range;
-  const ratio = price / entry;
-  const value = bidAskValue(bidAskBins({ range, binStep: step }), ratio);
-  const hours = Math.min(1, Math.max(0, (now - position.openedAt) / 3_600_000));
-  const fee = pool && pool.tvl > 0 ? hours * (pool.fees1h / pool.tvl) : 0;
-  const positionPct = value - 1 + fee;
-  const marked: LivePosition = { ...next, tokenPct: ratio - 1, positionPct };
+  if (positionPct == null) return marked;
   if (positionPct >= params.takeProfit) return { ...marked, closing: true, closeReason: "take-profit", note: "Llegó a la toma. Cerrando." };
   if (positionPct <= -params.stopLoss) return { ...marked, closing: true, closeReason: "loss", note: "Llegó al stop. Cerrando." };
   return marked;
@@ -145,7 +185,9 @@ export function planLiveLp(input: {
   params: LiveParams;
   positions: LivePosition[];
   candidates: LiveCandidate[];
-  prices: Record<string, number>;
+  marks: Record<string, PositionMark | undefined>;
+  /** Pool address → time until which it may not be opened. */
+  skipped?: Record<string, number>;
   now: number;
   pendingOpen: boolean;
 }): LivePlan {
@@ -153,7 +195,7 @@ export function planLiveLp(input: {
     if (input.kill && position.signature && !position.closing) {
       return { ...position, closing: true, closeReason: "stop" as const, note: "Corte de emergencia. Cerrando." };
     }
-    return markAt(position, input.prices[position.address], input.candidates.find((pool) => pool.address === position.address), input.now, input.params);
+    return markAt(position, input.marks[position.address], input.now, input.params);
   });
   const closing = positions.some((position) => position.closing);
   if (input.kill || !input.running) {
@@ -163,6 +205,7 @@ export function planLiveLp(input: {
     return { positions, open: null, notice: input.pendingOpen ? "Hay una apertura a medias. No se abre otra hasta confirmarla." : "Primero se cierran las que ya pidieron salida." };
   }
   const busy = new Set(positions.map((position) => position.address));
+  for (const [address, until] of Object.entries(input.skipped ?? {})) if (until > input.now) busy.add(address);
   const pool = choosePool(input.candidates, input.params, input.params.range, busy);
   const openStakeLamports = positions.filter((position) => !position.closing).reduce((sum, position) => sum + Math.round(position.stakeSol * 1_000_000_000), 0);
   const lamports = openLamports({

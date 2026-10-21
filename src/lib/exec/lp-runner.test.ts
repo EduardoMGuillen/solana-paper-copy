@@ -40,19 +40,26 @@ function candidate(): LiveCandidate {
   };
 }
 
-function chain(balance: number, calls: string[]): LiveChain {
+const positionKey = "Pos111111111111111111111111111111111111111";
+
+/** Fake chain. `onChain` holds the position accounts that exist; `value` is what each is worth. */
+function chain(balance: number, calls: string[], onChain = new Set<string>(), value = () => 200_000_000): LiveChain {
   return {
     balanceLamports: async () => balance,
     landed: async () => false,
-    open: async (_order, onSent) => {
+    existing: async (keys) => new Set(keys.filter((key) => onChain.has(key))),
+    inspect: async (position) => ({ exists: onChain.has(position.position ?? ""), valueLamports: value(), price: 0.001 }),
+    open: async (_order, onSigned) => {
       calls.push("open");
-      const sent = { signature: "sigopen", position: "Pos111111111111111111111111111111111111111", minBinId: 100, maxBinId: 156 };
-      onSent(sent);
+      const sent = { signature: "sigopen", position: positionKey, minBinId: 100, maxBinId: 156, entryPrice: 0.001 };
+      onSigned(sent);
+      onChain.add(positionKey);
       return sent;
     },
-    close: async (_position, onSent) => {
+    close: async (position, onSigned) => {
       calls.push("close");
-      onSent("sigclose");
+      onSigned("sigclose");
+      onChain.delete(position.position ?? "");
       return "sigclose";
     },
     sell: async () => {
@@ -69,13 +76,14 @@ describe("live cycle", () => {
     setLiveBot(dir, true);
     const calls: string[] = [];
     const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
-    await runLiveCycle(dir, chain(2_000_000_000, calls), async () => [candidate()], env, 10_000);
+    const used = chain(2_000_000_000, calls);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     expect(calls).toEqual(["open"]);
     const book = readLiveFile(dir);
     expect(book.positions).toHaveLength(1);
     expect(book.positions[0]?.signature).toBe("sigopen");
     expect(book.positions[0]?.stakeSol).toBeCloseTo(0.2);
-    await runLiveCycle(dir, chain(2_000_000_000, calls), async () => [candidate()], env, 20_000);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     expect(calls).toEqual(["open"]);
     const secret = fs.readFileSync(path.join(dir, "wallet.json"), "utf8").slice(0, 24);
     expect(fs.readFileSync(path.join(dir, "intents.jsonl"), "utf8")).not.toContain(secret);
@@ -161,6 +169,108 @@ describe("live cycle", () => {
     expect(journal).toContain("\"kind\":\"sell\"");
     expect(journal).toContain("sigsell");
     expect(journal).not.toContain(fs.readFileSync(path.join(again, "wallet.json"), "utf8").slice(0, 24));
+  });
+
+  it("adopts a signed open whose confirm failed but which landed", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const onChain = new Set<string>();
+    const used = chain(2_000_000_000, calls, onChain);
+    used.open = async (_order, onSigned) => {
+      calls.push("open");
+      onSigned({ signature: "sigopen", position: positionKey, minBinId: 100, maxBinId: 156, entryPrice: 0.001 });
+      onChain.add(positionKey);
+      throw new Error("El RPC no respondió la confirmación.");
+    };
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    expect(readLiveFile(dir).positions).toHaveLength(0);
+    expect(readLiveFile(dir).notice).toMatch(/se revisa en la cadena/);
+    expect(readIntents(dir).some((intent) => intent.status === "failed")).toBe(false);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
+    const book = readLiveFile(dir);
+    expect(book.positions).toHaveLength(1);
+    expect(book.positions[0]?.position).toBe(positionKey);
+    expect(calls).toEqual(["open"]);
+  });
+
+  it("pauses a pool whose open failed before signing", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const used = chain(2_000_000_000, calls);
+    used.open = async () => {
+      calls.push("open");
+      throw new Error("Este rango necesita crear 2 bin array(s).");
+    };
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    expect(readLiveFile(dir).skipped[pool]).toBeGreaterThan(10_000);
+    expect(readLiveFile(dir).notice).toMatch(/pausa 6 h/);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
+    expect(calls).toEqual(["open"]);
+  });
+
+  it("takes profit on the on-chain value", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    let worth = 200_000_000;
+    const used = chain(2_000_000_000, calls, new Set<string>(), () => worth);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    worth = 220_000_000;
+    await runLiveCycle(dir, used, async () => [], env, 20_000);
+    expect(calls).toEqual(["open", "close", "sell"]);
+    expect(readLiveFile(dir).positions).toHaveLength(0);
+    expect(readIntents(dir).some((intent) => intent.kind === "close" && intent.status === "confirmed")).toBe(true);
+  });
+
+  it("still closes when the market list fails", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const used = chain(2_000_000_000, calls);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    expect(closeLivePosition(dir, pool).error).toBeNull();
+    await runLiveCycle(dir, used, async () => {
+      throw new Error("Meteora respondió 503");
+    }, env, 20_000);
+    expect(calls).toEqual(["open", "close", "sell"]);
+    expect(readLiveFile(dir).positions).toHaveLength(0);
+  });
+
+  it("retries a token that could not be sold and drops it once sold", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const used = chain(2_000_000_000, calls);
+    let liquid = false;
+    used.sell = async (_target, onSigned) => {
+      calls.push("sell");
+      if (!liquid) return { sold: false, reason: "La venta pasaría el tope de impacto. El token se quedó en la wallet." };
+      onSigned("sigsell");
+      return { sold: true, signature: "sigsell", outLamports: BigInt(50_000_000) };
+    };
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    setLiveBot(dir, false);
+    await runLiveCycle(dir, used, async () => [], env, 20_000);
+    expect(readLiveFile(dir).leftovers).toHaveLength(1);
+    await runLiveCycle(dir, used, async () => [], env, 60_000);
+    expect(calls).toEqual(["open", "close", "sell"]);
+    liquid = true;
+    await runLiveCycle(dir, used, async () => [], env, 20_000 + 5 * 60_000);
+    expect(calls).toEqual(["open", "close", "sell", "sell"]);
+    expect(readLiveFile(dir).leftovers).toHaveLength(0);
+    expect(readLiveFile(dir).notice).toMatch(/0\.0500 SOL/);
   });
 
   it("pushes the open-position snapshot once every 15 minutes and not while the bot is off", async () => {

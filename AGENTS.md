@@ -9,7 +9,13 @@ A **paper-trading bot for Solana tokens**, built with Next.js 16 and TypeScript.
 1. **Trend trading:** EMA crossovers and similar strategies on 4h candles from Binance. Each strategy is walk-forward validated per market, and only strategies that pass are traded.
 2. **Meteora DLMM research:** a collector and a paper simulator for Decoder-Farmer-style SOL-only Bid-Ask liquidity positions.
 
-**No real money moves today.** There is no private key anywhere in the project. "Shadow mode" asks Jupiter for real quotes without a wallet, so nothing can be signed. Real execution is designed in `docs/EJECUCION-REAL.md` but not implemented.
+**Trend trading moves no real money.** "Shadow mode" asks Jupiter for real quotes without a wallet, so nothing can be signed there.
+
+**Meteora live signs real transactions.** It uses a dedicated wallet kept outside the repo (`~/.solana-paper-bot` or `WALLET_DIR`). It signs only while the bot is started from the dashboard and there is no `KILL` file. `src/lib/exec/lp-chain.ts` is the only module that opens `wallet.json`. Everything else follows `docs/EJECUCION-REAL.md`:
+- Hard limits come from env (`LIVE_*`).
+- The journal (`intents.jsonl`) gets the signature after signing and before broadcast.
+- Each pass reconciles signed opens against the accounts on chain.
+- Exits use the position's on-chain value, fees included, never a model.
 
 ## Commands
 
@@ -69,7 +75,11 @@ Auth: src/proxy.ts (HTTP Basic auth when BOT_PASSWORD is set; otherwise localhos
 | `src/lib/bot/view.ts` | Everything the dashboard shows (the `BotView` type). |
 | `src/lib/bot/rotation.ts`, `universe.ts` | Momentum-rotation simulator (research only, rejected). |
 | `src/lib/exec/*` | Shadow mode: `tokens.ts` (mints), `jupiter.ts` (quote, no taker), `shadow.ts` (cost math), `runner.ts` (plan, run, apply). |
-| `src/lib/lp/*` | Meteora: `bidask.ts` (position value math), `meteora.ts` (API parsing, screen, forward test). |
+| `src/lib/lp/*` | Meteora: `bidask.ts` (position value math), `meteora.ts` (API parsing, screen, forward test), `livebook.ts` (paper book). |
+| `src/lib/exec/lp-plan.ts` | Meteora live decisions, pure: pool choice, size, exits on the on-chain mark. |
+| `src/lib/exec/lp-chain.ts` | Meteora live signing: open, close, sell, read position value. The only file that opens the key. |
+| `src/lib/exec/lp-runner.ts` | Meteora live pass: reconcile, mark, close, retry leftovers, open. |
+| `src/lib/exec/wallet.ts`, `intents.ts`, `live-book.ts` | Wallet files, live book (`bot.json`), intent journal. |
 | `src/lib/notify/telegram.ts` | Alert batching and sending. |
 | `src/lib/service.ts` | Orchestration, the state lock (`withState`), dashboard actions. |
 | `src/lib/store.ts`, `paths.ts` | Persistence. |
@@ -90,6 +100,11 @@ Use `.env.local` on a PC and `/etc/solana-bot.env` on the VM. The template is `.
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Push alerts. |
 | `SOLANA_RPC_URL` | RPC used to read token decimals. Defaults to the public RPC. |
 | `PAPER_DATA_DIR` | Data folder. Defaults to `./data`. |
+| `WALLET_DIR` | Meteora live wallet folder. Defaults to `~/.solana-paper-bot`. Must be outside the repo. |
+| `LIVE_LP_MAX_SOL`, `LIVE_MIN_SOL_RESERVE` | Meteora live cap on open stake, and SOL that is never spent. |
+| `LIVE_MAX_PRICE_IMPACT_BPS`, `LIVE_MAX_SLIPPAGE_BPS` | Impact and slippage limits for opens and leftover sales. |
+| `LIVE_PRIORITY_MICROLAMPORTS` | Priority fee per compute unit. Defaults to 20000. |
+| `LIVE_MAX_BIN_ARRAY_RENT_SOL` | Non-refundable bin-array rent an open may pay. Defaults to 0 (refuse). |
 | `BINANCE_DATA_URL`, `METEORA_API_URL`, `JUPITER_API_URL` | Endpoint overrides. |
 
 ## Rules (do not break)
@@ -122,6 +137,14 @@ Use `.env.local` on a PC and `/etc/solana-bot.env` on the VM. The template is `.
   - A quote more than 20% off Binance is flagged `suspicious`, which points to a wrong mint.
   - Jupiter v2 field names (`inAmount`, `outAmount`, `priceImpactPct`) were taken from public docs and are parsed defensively.
 - **Meteora:** parsing follows the documented `GET /pair/all`. The collector runs as a separate, memory-capped systemd timer so it can never take the bot down.
+- **Meteora paper vs live:** they are not the same model, so paper results do not predict live ones.
+  - The paper book charges the pool's fees/TVL on 1 SOL while price is inside the range. Bid-Ask puts most SOL in the lowest bins, so that likely overstates fees.
+  - Paper ignores rent, exit impact and failed sends.
+  - Live uses the real on-chain value.
+- **Meteora live costs:**
+  - A position locks ~0.057 SOL of rent, returned on close.
+  - Each new bin array costs ~0.0714 SOL that never comes back. Opens that need one are refused unless `LIVE_MAX_BIN_ARRAY_RENT_SOL` allows it.
+- **Meteora live, 1% bin pools:** they never open. A 75% range needs 137 bins and one position holds 69.
 - **Network blocks:** the owner's work network blocks Jupiter and Meteora. Test those features from home or the VM.
 - **Platform:** `npm run dev` must work on Windows, so do not use `VAR=value cmd` syntax in package.json scripts.
 - **Next.js 16:** middleware is now `src/proxy.ts`. Read `node_modules/next/dist/docs/` for the current APIs instead of relying on older Next.js knowledge.
