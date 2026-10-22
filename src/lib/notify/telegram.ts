@@ -103,7 +103,14 @@ export type LiveDigestRow = {
 function signedPct(fraction: number): string {
   const value = fraction * 100;
   const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+/** Position return, named so a flat mark is not called a profit. */
+function positionResult(fraction: number): string {
+  const value = fraction * 100;
+  if (Math.abs(value) < 0.005) return "plano 0.00%";
+  return `${value > 0 ? "profit" : "loss"} ${signedPct(fraction)}`;
 }
 
 function ageLabel(ms: number): string {
@@ -126,10 +133,10 @@ export function formatLiveDigest(input: { now: number; positions: LiveDigestRow[
     return `${header}${why}`;
   }
   const lines = input.positions.map((position) => {
-    const pnl = position.positionPct == null ? "" : ` · posición ${signedPct(position.positionPct)}`;
+    const pnl = position.positionPct == null ? "" : ` · ${positionResult(position.positionPct)}`;
     const price = position.tokenPct == null ? "" : ` · precio ${signedPct(position.tokenPct)}`;
-    const state = position.closing ? ` · cerrando${position.closeReason ? ` (${escapeHtml(position.closeReason)})` : ""}` : `${pnl}${price}`;
-    return `• <b>${escapeHtml(position.name)}</b> · ${position.stakeSol.toFixed(4)} SOL${state} · ${ageLabel(input.now - position.openedAt)}`;
+    const closing = position.closing ? ` · cerrando${position.closeReason ? ` (${escapeHtml(position.closeReason)})` : ""}` : "";
+    return `• <b>${escapeHtml(position.name)}</b> · ${position.stakeSol.toFixed(4)} SOL${pnl}${price}${closing} · ${ageLabel(input.now - position.openedAt)}`;
   });
   return [header, ...lines].join("\n").slice(0, MAX_LEN);
 }

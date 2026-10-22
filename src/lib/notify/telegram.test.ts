@@ -75,8 +75,19 @@ describe("telegram alerts", () => {
     expect(text).toContain("1 abierta");
     expect(text).toContain("0.0141 SOL");
     expect(text).toContain("WEFT &lt;SOL&gt;");
-    expect(text).toContain("posición +1.2%");
-    expect(text).toContain("precio -3.0%");
+    expect(text).toContain("profit +1.20%");
+    expect(text).toContain("precio -3.00%");
+    expect(text).not.toContain("loss");
+    const loss = formatLiveDigest({
+      now,
+      notice: null,
+      positions: [
+        { name: "MASK-SOL", stakeSol: 0.0296, openedAt: now - 60_000, closing: false, closeReason: null, positionPct: -0.021, tokenPct: -0.04 },
+        { name: "plano-SOL", stakeSol: 0.01, openedAt: now - 60_000, closing: false, closeReason: null, positionPct: 0.00001, tokenPct: 0 },
+      ],
+    });
+    expect(loss).toContain("loss -2.10%");
+    expect(loss).toContain("plano 0.00%");
     expect(text).toContain("1 h");
     expect(text).toContain("cerrando (manual)");
     expect(text).toContain("1 cerrando");

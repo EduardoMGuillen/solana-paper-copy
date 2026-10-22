@@ -25,6 +25,23 @@ export type WalletLimits = {
   minReserveSol: number;
 };
 
+export type PortfolioRow = {
+  address: string;
+  /** Marked liquidity plus the position-account rent, when the rent could be read. */
+  valueSol: number;
+  rentSol: number | null;
+  /** Result of the liquidity versus the deposit. Rent is not a gain or a loss. */
+  pnlSol: number | null;
+  /** Share of the wallet plus every position. Null when the total is unknown. */
+  share: number | null;
+};
+
+export type PortfolioView = {
+  totalSol: number | null;
+  poolsSol: number;
+  rows: PortfolioRow[];
+};
+
 export type WalletStatus = {
   ready: boolean;
   address: string | null;
@@ -32,6 +49,8 @@ export type WalletStatus = {
   /** SOL/USDT used for `balanceUsd`. Null when the price feed failed. */
   solUsd: number | null;
   balanceUsd: number | null;
+  /** Free SOL, marked liquidity and position rent. */
+  portfolio: PortfolioView;
   lamports: number | null;
   /** True only while this window is running and there is no KILL file. */
   signing: boolean;
@@ -187,6 +206,31 @@ export function createDedicatedWallet(dir: string, cwd = process.cwd()): string 
   return address;
 }
 
+/** Wallet SOL plus each position's marked liquidity and its account rent. */
+export function portfolioView(
+  balanceSol: number | null,
+  positions: Pick<LivePosition, "address" | "stakeSol" | "positionPct">[],
+  rents: ReadonlyMap<string, number | null> = new Map(),
+): PortfolioView {
+  const rows: PortfolioRow[] = positions.map((position) => {
+    const rentSol = rents.has(position.address) ? (rents.get(position.address) ?? null) : null;
+    const mark = position.positionPct == null ? position.stakeSol : position.stakeSol * (1 + position.positionPct);
+    return {
+      address: position.address,
+      valueSol: mark + (rentSol ?? 0),
+      rentSol,
+      pnlSol: position.positionPct == null ? null : position.stakeSol * position.positionPct,
+      share: null,
+    };
+  });
+  const poolsSol = rows.reduce((sum, row) => sum + row.valueSol, 0);
+  const totalSol = balanceSol == null ? null : balanceSol + poolsSol;
+  if (totalSol != null && totalSol > 0) {
+    for (const row of rows) row.share = row.valueSol / totalSol;
+  }
+  return { totalSol, poolsSol, rows };
+}
+
 /** Dollar value of a SOL balance. Missing price or balance stays null. */
 export function withSolUsd(status: WalletStatus, solUsd: number | null): WalletStatus {
   const price = solUsd != null && solUsd > 0 ? solUsd : null;
@@ -195,6 +239,19 @@ export function withSolUsd(status: WalletStatus, solUsd: number | null): WalletS
     solUsd: price,
     balanceUsd: status.balanceSol != null && price != null ? status.balanceSol * price : null,
   };
+}
+
+export function parseAccountLamports(body: unknown, count: number): number[] {
+  const record = (body ?? {}) as { result?: { value?: unknown }; error?: { message?: string } };
+  if (record.error) throw new Error(record.error.message || "El RPC rechazó las cuentas.");
+  const value = record.result?.value;
+  if (!Array.isArray(value) || value.length !== count) throw new Error("El RPC no devolvió las cuentas.");
+  return value.map((row) => {
+    if (row == null) return 0;
+    const lamports = (row as { lamports?: unknown }).lamports;
+    if (typeof lamports !== "number" || !Number.isInteger(lamports) || lamports < 0) throw new Error("El RPC no devolvió el alquiler.");
+    return lamports;
+  });
 }
 
 export function parseLamports(body: unknown): number {
@@ -206,6 +263,18 @@ export function parseLamports(body: unknown): number {
 }
 
 type RpcPost = (url: string, init: { method: string; headers: { "content-type": string }; body: string; signal: AbortSignal }) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+
+export async function fetchAccountLamports(addresses: string[], rpcUrl: string, post: RpcPost = fetch): Promise<number[]> {
+  if (addresses.length === 0) return [];
+  const response = await post(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [addresses, { encoding: "base64" }] }),
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) throw new Error("El RPC no respondió las cuentas.");
+  return parseAccountLamports(await response.json(), addresses.length);
+}
 
 export async function fetchLamports(address: string, rpcUrl: string, post: RpcPost = fetch): Promise<number> {
   const response = await post(rpcUrl, {
@@ -411,6 +480,7 @@ export async function walletStatus(
       kill: false,
       journal: 0,
       limits,
+      portfolio: portfolioView(null, []),
       error: cause instanceof Error ? cause.message : "Wallet fuera de lugar.",
     };
   }
@@ -434,6 +504,7 @@ export async function walletStatus(
       kill: fs.existsSync(path.join(dir, "KILL")),
       journal: journalCount(dir),
       limits,
+      portfolio: portfolioView(null, []),
       error: cause instanceof Error ? cause.message : "No se pudo leer la dirección.",
     };
   }
@@ -456,17 +527,34 @@ export async function walletStatus(
     balanceUsd: null,
   };
   if (!address) {
-    return { ...base, balanceSol: null, lamports: null, error: "Todavía no hay wallet dedicada." };
+    return { ...base, balanceSol: null, lamports: null, portfolio: portfolioView(null, stored.positions), error: "Todavía no hay wallet dedicada." };
   }
+  const rpc = env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC;
   try {
-    const lamports = await fetchLamports(address, env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC, post);
-    return { ...base, balanceSol: lamports / 1_000_000_000, lamports, error: null };
+    const lamports = await fetchLamports(address, rpc, post);
+    const balanceSol = lamports / 1_000_000_000;
+    const rents = await positionRents(stored.positions, rpc, post);
+    return { ...base, balanceSol, lamports, portfolio: portfolioView(balanceSol, stored.positions, rents), error: null };
   } catch (cause) {
     return {
       ...base,
       balanceSol: null,
       lamports: null,
+      portfolio: portfolioView(null, stored.positions),
       error: cause instanceof Error ? cause.message : "No se pudo leer el saldo.",
     };
   }
+}
+
+async function positionRents(positions: LivePosition[], rpcUrl: string, post?: RpcPost): Promise<Map<string, number | null>> {
+  const rents = new Map<string, number | null>();
+  const keyed = positions.flatMap((position) => (position.position ? [[position.address, position.position] as const] : []));
+  if (keyed.length === 0) return rents;
+  try {
+    const amounts = await fetchAccountLamports(keyed.map(([, id]) => id), rpcUrl, post);
+    keyed.forEach(([address], index) => rents.set(address, amounts[index] / 1_000_000_000));
+  } catch {
+    keyed.forEach(([address]) => rents.set(address, null));
+  }
+  return rents;
 }

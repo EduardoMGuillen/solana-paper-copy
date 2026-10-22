@@ -7,7 +7,9 @@ import {
   createDedicatedWallet,
   decodeBase58,
   encodeBase58,
+  parseAccountLamports,
   parseLamports,
+  portfolioView,
   closeLivePosition,
   readLiveRunning,
   readWalletAddress,
@@ -221,6 +223,7 @@ describe("live window status", () => {
       kill: false,
       journal: 0,
       limits: { liveMode: "paper", lpMaxSol: 0.3, minReserveSol: 0.03 },
+      portfolio: { totalSol: 0.5, poolsSol: 0, rows: [] },
       error: null,
     } satisfies WalletStatus;
     expect(withSolUsd(bare, 180).balanceUsd).toBe(90);
@@ -231,5 +234,43 @@ describe("live window status", () => {
   it("parses a lamport balance and rejects an RPC error", () => {
     expect(parseLamports({ result: { value: 1_500_000_000 } })).toBe(1_500_000_000);
     expect(() => parseLamports({ error: { message: "no" } })).toThrow(/no/);
+    expect(parseAccountLamports({ result: { value: [{ lamports: 41_899_840 }, null] } }, 2)).toEqual([41_899_840, 0]);
+    expect(() => parseAccountLamports({ result: { value: [{ lamports: 1 }] } }, 2)).toThrow(/cuentas/);
+  });
+
+  it("adds marked liquidity and position rent into the total", () => {
+    const view = portfolioView(0.22333487, [
+      { address: "pill", stakeSol: 0.037765525, positionPct: 0.0004 },
+      { address: "mask", stakeSol: 0.029646608, positionPct: 0 },
+    ], new Map([["pill", 0.04189984], ["mask", 0.04189984]]));
+    expect(view.poolsSol).toBeCloseTo(0.037765525 * 1.0004 + 0.04189984 + 0.029646608 + 0.04189984, 8);
+    expect(view.totalSol).toBeCloseTo(0.22333487 + view.poolsSol, 8);
+    expect(view.rows[0].pnlSol).toBeCloseTo(0.037765525 * 0.0004, 10);
+    expect(view.rows[1].pnlSol).toBe(0);
+    const pillShare = view.rows[0].share ?? 0;
+    const maskShare = view.rows[1].share ?? 0;
+    expect(pillShare).toBeCloseTo(view.rows[0].valueSol / (view.totalSol ?? 1), 8);
+    expect(pillShare + maskShare).toBeCloseTo(view.poolsSol / (view.totalSol ?? 1), 8);
+  });
+
+  it("reads position-account rent into the live total", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    const pool = "6ELicDvGWaSYhUBFDQGckuRWZGP5du8bLuzWw3G7AQxD";
+    fs.writeFileSync(path.join(dir, "bot.json"), JSON.stringify({
+      running: true,
+      params: PAPER_LIVE_PARAMS,
+      positions: [{ address: pool, name: "pill-SOL", stakeSol: 0.1, openedAt: 1, signature: "sig", position: "4h4mcEXd5y66kTjzxtnPXJdkKb6ma8xHjhbviJQTpKoR", positionPct: 0.02, note: "" }],
+    }), "utf8");
+    const status = await walletStatus({ WALLET_DIR: dir }, async (_url, init) => {
+      const body = JSON.parse(String(init.body)) as { method: string };
+      if (body.method === "getMultipleAccounts") return { ok: true, json: async () => ({ result: { value: [{ lamports: 40_000_000 }] } }) };
+      return { ok: true, json: async () => ({ result: { value: 200_000_000 } }) };
+    });
+    expect(status.balanceSol).toBe(0.2);
+    expect(status.portfolio.rows[0].rentSol).toBe(0.04);
+    expect(status.portfolio.poolsSol).toBeCloseTo(0.142, 8);
+    expect(status.portfolio.totalSol).toBeCloseTo(0.342, 8);
+    expect(status.portfolio.rows[0].pnlSol).toBeCloseTo(0.002, 8);
   });
 });

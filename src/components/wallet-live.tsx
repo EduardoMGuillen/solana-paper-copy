@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LivePosition } from "@/lib/exec/live-book";
 import { LIVE_PRESETS, sameLiveParams, type LiveParams } from "@/lib/exec/live-params";
-import type { WalletStatus } from "@/lib/exec/wallet";
+import type { PortfolioRow, WalletStatus } from "@/lib/exec/wallet";
 
 type FormState = {
   slotPct: string;
@@ -156,7 +156,11 @@ export function WalletLive() {
 
   const running = status?.running === true;
   const openPositions = status?.positions ?? [];
-  const inPools = openPositions.reduce((sum, position) => sum + (position.closing ? 0 : position.stakeSol), 0);
+  const portfolio = status?.portfolio;
+  const poolsSol = portfolio?.poolsSol ?? 0;
+  const totalSol = portfolio?.totalSol ?? null;
+  const price = status?.solUsd != null && status.solUsd > 0 ? status.solUsd : null;
+  const rentMissing = (portfolio?.rows ?? []).some((row) => row.rentSol == null) && openPositions.some((position) => position.position);
   const locked = !status || running || status.kill;
   const address = status?.address ?? null;
   const params = status?.params;
@@ -200,10 +204,10 @@ export function WalletLive() {
         </p>
 
         <div className="grid grid-cols-2 divide-x divide-y divide-white/10 border-b border-white/10 md:grid-cols-4 md:divide-y-0">
-          <Metric k="Wallet" v={status?.balanceSol == null ? "—" : sol(status.balanceSol)} hint={status?.balanceUsd == null ? (status?.balanceSol === 0 ? "Sin fondos" : "Saldo on-chain") : money(status.balanceUsd)} />
-          <Metric k="En pools" v={sol(inPools)} hint={inPools === 0 ? "Sin liquidez puesta" : "SOL en posiciones abiertas"} />
-          <Metric k="Libre" v={status?.balanceSol == null ? "—" : sol(Math.max(0, status.balanceSol - inPools))} hint="Saldo que no está en un pool" />
-          <Metric k="Posiciones" v={String(openPositions.length)} hint={params ? `Cada nueva usa el ${plain(params.slot * 100, 0)}%` : "—"} />
+          <Metric k="Valor total" v={totalSol == null ? "—" : sol(totalSol)} hint={totalSol == null || price == null ? "Wallet, liquidez y alquiler" : money(totalSol * price)} />
+          <Metric k="Wallet" v={status?.balanceSol == null ? "—" : sol(status.balanceSol)} hint={status?.balanceUsd == null ? (status?.balanceSol === 0 ? "Sin fondos" : "Libre en la wallet") : money(status.balanceUsd)} />
+          <Metric k="En pools" v={sol(poolsSol)} hint={poolsSol === 0 ? "Sin liquidez puesta" : price == null ? "Liquidez y alquiler" : money(poolsSol * price)} />
+          <Metric k="Posiciones" v={String(openPositions.length)} hint={rentMissing ? "Falta el alquiler de una posición" : params ? `Cada nueva usa el ${plain(params.slot * 100, 0)}%` : "—"} />
         </div>
 
         <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -257,11 +261,12 @@ export function WalletLive() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="text-[11px] tracking-wide text-muted-foreground uppercase">
               <tr className="border-b border-white/10">
                 <th className="px-4 py-3 font-medium sm:px-5">Pool</th>
                 <th className="px-3 py-3 font-medium">Tamaño</th>
+                <th className="px-3 py-3 font-medium">Valor</th>
                 <th className="px-3 py-3 font-medium">Token</th>
                 <th className="px-3 py-3 font-medium">Posición</th>
                 <th className="px-3 py-3 font-medium">Comisión</th>
@@ -273,7 +278,7 @@ export function WalletLive() {
             <tbody>
               {(status?.positions.length ?? 0) === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 sm:px-5">
+                  <td colSpan={9} className="px-4 py-8 sm:px-5">
                     <p className="text-base font-medium">Sin posiciones abiertas</p>
                     <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
                       {running
@@ -286,7 +291,14 @@ export function WalletLive() {
                 </tr>
               ) : (
                 status?.positions.map((position) => (
-                  <PositionRow key={position.address} position={position} busy={busy} onClose={() => void post({ close: position.address })} />
+                  <PositionRow
+                    key={position.address}
+                    position={position}
+                    holding={portfolio?.rows.find((row) => row.address === position.address) ?? null}
+                    solUsd={price}
+                    busy={busy}
+                    onClose={() => void post({ close: position.address })}
+                  />
                 ))
               )}
             </tbody>
@@ -462,7 +474,22 @@ function hoursOpen(openedAt: number): string {
   return `${hours.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h`;
 }
 
-function PositionRow({ position, busy, onClose }: { position: LivePosition; busy: boolean; onClose: () => void }) {
+function signedMoney(value: number): string {
+  if (value > 0) return `+${money(value)}`;
+  if (value < 0) return `−${money(Math.abs(value))}`;
+  return money(0);
+}
+
+function signedSol(value: number): string {
+  const body = sol(Math.abs(value));
+  if (value > 0) return `+${body}`;
+  if (value < 0) return `−${body}`;
+  return body;
+}
+
+function PositionRow({ position, holding, solUsd, busy, onClose }: { position: LivePosition; holding: PortfolioRow | null; solUsd: number | null; busy: boolean; onClose: () => void }) {
+  const pnl = holding?.pnlSol ?? null;
+  const tone = pnl != null && pnl < 0 ? "loss" : pnl != null && pnl > 0 ? "gain" : "";
   return (
     <tr className="border-b border-white/10">
       <td className="px-4 py-3 sm:px-5">
@@ -470,8 +497,20 @@ function PositionRow({ position, busy, onClose }: { position: LivePosition; busy
         <p className="num text-[11px] text-muted-foreground">{position.address.slice(0, 4)}…{position.address.slice(-4)}</p>
       </td>
       <td className="num px-3 py-3">{sol(position.stakeSol)}</td>
+      <td className="num px-3 py-3">
+        <p>{holding ? sol(holding.valueSol) : "—"}</p>
+        <p className="text-[11px] text-muted-foreground">
+          {holding && solUsd != null ? money(holding.valueSol * solUsd) : "—"}
+          {holding?.share != null ? ` · ${(holding.share * 100).toLocaleString("es-ES", { maximumFractionDigits: 1 })}%` : ""}
+        </p>
+      </td>
       <td className={`num px-3 py-3 ${position.tokenPct !== null && position.tokenPct < 0 ? "loss" : position.tokenPct !== null && position.tokenPct > 0 ? "gain" : ""}`}>{pct(position.tokenPct)}</td>
-      <td className={`num px-3 py-3 ${position.positionPct !== null && position.positionPct < 0 ? "loss" : position.positionPct !== null && position.positionPct > 0 ? "gain" : ""}`}>{pct(position.positionPct)}</td>
+      <td className={`num px-3 py-3 ${tone}`}>
+        <p>{pct(position.positionPct)}</p>
+        <p className="text-[11px]">
+          {pnl == null ? "—" : `${signedSol(pnl)} · ${solUsd == null ? "—" : signedMoney(pnl * solUsd)}`}
+        </p>
+      </td>
       <td className="px-3 py-3 text-muted-foreground">—</td>
       <td className="num px-3 py-3">{hoursOpen(position.openedAt)}</td>
       <td className="px-4 py-3 text-sm text-muted-foreground sm:px-5">{position.note || (position.closing ? "Cerrando." : "Abierta.")}</td>
