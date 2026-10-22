@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readIntents } from "./intents";
 import type { LiveCandidate } from "./lp-plan";
 import { runLiveCycle, sendLiveDigest } from "./lp-runner";
-import type { LiveChain } from "./lp-chain";
+import { IncompleteOpen, type LiveChain } from "./lp-chain";
 import { closeLivePosition, createDedicatedWallet, readLiveFile, setLiveBot } from "./wallet";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
@@ -212,6 +212,34 @@ describe("live cycle", () => {
     expect(readLiveFile(dir).notice).toMatch(/pausa 6 h/);
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     expect(calls).toEqual(["open"]);
+  });
+
+  it("closes a position whose account landed but whose deposit did not", async () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    setLiveBot(dir, true);
+    const calls: string[] = [];
+    const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
+    const onChain = new Set<string>();
+    const used = chain(2_000_000_000, calls, onChain);
+    used.open = async (_order, onSigned) => {
+      calls.push("open");
+      const sent = { signature: "sigcreate", position: positionKey, minBinId: 100, maxBinId: 239, entryPrice: 0.001 };
+      onSigned(sent);
+      onChain.add(positionKey);
+      throw new IncompleteOpen("La posición se creó pero la liquidez no entró completa.", sent);
+    };
+    await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
+    let book = readLiveFile(dir);
+    expect(book.positions).toHaveLength(1);
+    expect(book.positions[0]?.closing).toBe(true);
+    expect(book.positions[0]?.position).toBe(positionKey);
+    expect(book.skipped[pool]).toBeGreaterThan(10_000);
+    await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
+    book = readLiveFile(dir);
+    expect(calls).toEqual(["open", "close", "sell"]);
+    expect(book.positions).toHaveLength(0);
+    expect(onChain.has(positionKey)).toBe(false);
   });
 
   it("takes profit on the on-chain value", async () => {

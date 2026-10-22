@@ -8,10 +8,21 @@ import { keepOnePoolPerName } from "../lp/history";
 import type { LiveParams } from "./live-params";
 import type { LivePosition } from "./live-book";
 
-/** One standard DLMM position. Wider ranges need a coarser bin step. */
+/** Bins strictly below the price that fit one standard DLMM position. */
 export const MAX_POSITION_BINS = 69;
-/** Rent returned when the position account is closed. */
+/** Bins of a standard position account (SDK `DEFAULT_BIN_PER_POSITION`). Wider ones are extended. */
+export const STANDARD_POSITION_BINS = 70;
+/** Hard ceiling of an extended position (SDK `MAX_BINS_PER_POSITION`). */
+export const MAX_EXTENDED_BINS = 1400;
+/** Rent returned when a standard position account is closed. */
 export const POSITION_RENT_LAMPORTS = 60_000_000;
+/** Extra returnable rent per bin past the standard 70 (112 bytes each), rounded up. */
+export const EXTRA_BIN_RENT_LAMPORTS = 600_000;
+
+/** Returnable rent of a position with `bins` bins, slightly over the chain's price. */
+export function positionRentLamports(bins: number): number {
+  return POSITION_RENT_LAMPORTS + Math.max(0, bins - STANDARD_POSITION_BINS) * EXTRA_BIN_RENT_LAMPORTS;
+}
 export const OPEN_FEE_LAMPORTS = 5_000_000;
 export const MIN_OPEN_LAMPORTS = 10_000_000;
 
@@ -88,28 +99,31 @@ export function binStepBps(binStep: number): number | null {
   return binStep < 1 ? Math.round(binStep * 10_000) : Math.round(binStep);
 }
 
-/** Bins strictly below the active price that cover `range`. Null when they do not fit one position. */
-export function binsBelow(range: number, binStep: number): number | null {
+/**
+ * Bins strictly below the active price that cover `range`.
+ * Null when they need more than `maxBins` in one position.
+ */
+export function binsBelow(range: number, binStep: number, maxBins = MAX_POSITION_BINS): number | null {
   const stepBps = binStepBps(binStep);
   if (stepBps == null || !(range > 0) || range >= 1) return null;
   const step = stepBps / 10_000;
   const bins = Math.ceil(-Math.log(1 - range) / Math.log(1 + step));
-  if (!Number.isFinite(bins) || bins < 1 || bins > MAX_POSITION_BINS) return null;
+  if (!Number.isFinite(bins) || bins < 1 || bins > Math.min(maxBins, MAX_EXTENDED_BINS)) return null;
   return bins;
 }
 
 /**
- * One position at a 2% bin step covers 74%, one point inside the 75% strategy.
- * Anything shorter is a different bet and stays closed.
+ * One standard position at a 2% bin step covers 74%, one point inside the 75%
+ * strategy. Anything shorter is a different bet and stays closed.
  */
 export const MIN_LIVE_RANGE = 0.74;
 
-/** The range actually placed. Shrinks by at most one point so a 2% pool still fits. */
-export function positionRange(target: number, binStep: number): { range: number; bins: number } | null {
-  const exact = binsBelow(target, binStep);
+/** The range actually placed. Shrinks by at most one point so a pool still fits `maxBins`. */
+export function positionRange(target: number, binStep: number, maxBins = MAX_POSITION_BINS): { range: number; bins: number } | null {
+  const exact = binsBelow(target, binStep, maxBins);
   if (exact != null) return { range: target, bins: exact };
   if (!(target >= MIN_LIVE_RANGE) || target - MIN_LIVE_RANGE > 0.01 + 1e-9) return null;
-  const fitted = binsBelow(MIN_LIVE_RANGE, binStep);
+  const fitted = binsBelow(MIN_LIVE_RANGE, binStep, maxBins);
   if (fitted == null) return null;
   return { range: MIN_LIVE_RANGE, bins: fitted };
 }
@@ -153,8 +167,8 @@ function toCandidate(pair: RawPair, now: number): LiveCandidate | null {
   return { ...snap, solIsY, tokenMint: solIsY ? mintX : mintY };
 }
 
-export function choosePool(candidates: LiveCandidate[], rules: ScreenRules, range: number, busy: Set<string>): LiveCandidate | null {
-  const ready = candidates.filter((pool) => passes(pool, rules) && !busy.has(pool.address) && positionRange(range, pool.binStep) != null);
+export function choosePool(candidates: LiveCandidate[], rules: ScreenRules, range: number, busy: Set<string>, maxBins = MAX_POSITION_BINS): LiveCandidate | null {
+  const ready = candidates.filter((pool) => passes(pool, rules) && !busy.has(pool.address) && positionRange(range, pool.binStep, maxBins) != null);
   ready.sort((a, b) => b.fees24h / b.tvl - a.fees24h / a.tvl);
   return ready[0] ?? null;
 }
@@ -201,7 +215,10 @@ export function planLiveLp(input: {
   skipped?: Record<string, number>;
   now: number;
   pendingOpen: boolean;
+  /** Widest position the chain side may build. Defaults to one standard position. */
+  maxBins?: number;
 }): LivePlan {
+  const maxBins = input.maxBins ?? MAX_POSITION_BINS;
   const positions = input.positions.map((position) => {
     if (input.kill && position.signature && !position.closing) {
       return { ...position, closing: true, closeReason: "stop" as const, note: "Corte de emergencia. Cerrando." };
@@ -217,18 +234,18 @@ export function planLiveLp(input: {
   }
   const busy = new Set(positions.map((position) => position.address));
   for (const [address, until] of Object.entries(input.skipped ?? {})) if (until > input.now) busy.add(address);
-  const pool = choosePool(input.candidates, input.params, input.params.range, busy);
+  const pool = choosePool(input.candidates, input.params, input.params.range, busy, maxBins);
+  const shaped = pool ? positionRange(input.params.range, pool.binStep, maxBins) : null;
   const openStakeLamports = positions.filter((position) => !position.closing).reduce((sum, position) => sum + Math.round(position.stakeSol * 1_000_000_000), 0);
   const lamports = openLamports({
     balanceLamports: input.balanceLamports,
     reserveLamports: input.reserveLamports,
-    rentLamports: POSITION_RENT_LAMPORTS,
+    rentLamports: positionRentLamports(shaped?.bins ?? 0),
     feeLamports: OPEN_FEE_LAMPORTS,
     maxLamports: Math.round(input.maxSol * 1_000_000_000),
     openStakeLamports,
     slot: input.params.slot,
   });
-  const shaped = pool ? positionRange(input.params.range, pool.binStep) : null;
   if (!pool || !shaped || lamports <= 0) {
     const why = lamports <= 0 ? "El SOL libre no alcanza para una posición y la reserva." : "Ningún pool que pase el filtro cabe en una sola posición con este rango.";
     return { positions, open: null, notice: `${why} No se envió nada.` };

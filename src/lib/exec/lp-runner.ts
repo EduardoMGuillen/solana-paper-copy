@@ -11,8 +11,8 @@ import { formatLiveDigest, formatLiveNotice, formatLiveSell, liveDigestDue, send
 import { decoderFilter } from "../lp/meteora";
 import { appendIntent, readIntents, type Intent } from "./intents";
 import type { LivePosition } from "./live-book";
-import { liveCandidates, planLiveLp, SKIP_POOL_MS, type LiveCandidate, type OpenOrder, type PositionMark } from "./lp-plan";
-import { liveChain, type LiveChain, type SellResult, type SellTarget, type SentOpen } from "./lp-chain";
+import { liveCandidates, MAX_EXTENDED_BINS, MAX_POSITION_BINS, planLiveLp, SKIP_POOL_MS, type LiveCandidate, type OpenOrder, type PositionMark } from "./lp-plan";
+import { IncompleteOpen, liveChain, type LiveChain, type SellResult, type SellTarget, type SentOpen } from "./lp-chain";
 import { DUST_SELL_REASON } from "./sell-rule";
 import { killFile, readLiveFile, readWalletAddress, walletDir, withWallet, writeLiveFile, type Leftover, type LiveFile } from "./wallet";
 
@@ -132,9 +132,11 @@ async function retryLeftovers(dir: string, chain: LiveChain, env: Record<string,
 function limits(env: Record<string, string | undefined>) {
   const reserve = Number(env.LIVE_MIN_SOL_RESERVE);
   const maxSol = Number(env.LIVE_LP_MAX_SOL);
+  const maxBins = Number(env.LIVE_MAX_POSITION_BINS);
   return {
     reserveLamports: Math.round((Number.isFinite(reserve) && reserve >= 0 ? reserve : 0.03) * 1_000_000_000),
     maxSol: Number.isFinite(maxSol) && maxSol >= 0 ? maxSol : 0.3,
+    maxBins: env.LIVE_MAX_POSITION_BINS?.trim() && Number.isFinite(maxBins) ? Math.min(MAX_EXTENDED_BINS, Math.max(MAX_POSITION_BINS, Math.floor(maxBins))) : 200,
   };
 }
 
@@ -351,6 +353,7 @@ export async function runLiveCycle(
     skipped: file.skipped,
     now,
     pendingOpen: settled.pending,
+    maxBins: cap.maxBins,
   });
   file = await withWallet(() => {
     const fresh = readLiveFile(dir);
@@ -444,6 +447,32 @@ export async function runLiveCycle(
     await notifyLive(env, formatLiveNotice({ kind: "open", name: order.name, stakeSol: order.lamports / 1_000_000_000, signature: sent.signature }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo abrir.";
+    if (error instanceof IncompleteOpen) {
+      // The account is on chain without all its SOL. Track it and close it to get the rent back.
+      appendIntent(dir, {
+        ...pending,
+        status: "failed",
+        signature: error.sent.signature,
+        position: error.sent.position,
+        minBinId: error.sent.minBinId,
+        maxBinId: error.sent.maxBinId,
+        error: message.slice(0, 280),
+      });
+      await withWallet(() => {
+        const fresh = readLiveFile(dir);
+        const opened = positionFrom(order, error.sent, now);
+        opened.closing = true;
+        opened.closeReason = "stop";
+        opened.note = "La liquidez no entró completa. Se cierra para devolver el alquiler.";
+        writeLiveFile(dir, {
+          ...fresh,
+          positions: [...fresh.positions.filter((position) => position.address !== opened.address), opened],
+          skipped: { ...fresh.skipped, [order.pool]: now + SKIP_POOL_MS },
+          notice: `${message.slice(0, 160)} ${order.name} se cierra y queda en pausa 6 h.`,
+        });
+      });
+      return;
+    }
     if (signed) {
       // Signed and maybe broadcast: the chain decides. settlePending and reconcile pick it up.
       await setNotice(dir, `${message.slice(0, 160)} La apertura de ${order.name} se firmó; se revisa en la cadena.`);

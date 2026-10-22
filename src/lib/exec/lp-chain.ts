@@ -11,10 +11,35 @@ import BN from "bn.js";
 import { DEFAULT_RPC, encodeBase58, readWalletAddress } from "./wallet";
 import { WSOL } from "../lp/meteora";
 import type { LivePosition } from "./live-book";
-import { BIN_ARRAY_RENT_LAMPORTS, MAX_OPEN_PRICE_DRIFT, positionValue, solPerToken, type OpenOrder, type PositionMark } from "./lp-plan";
+import {
+  BIN_ARRAY_RENT_LAMPORTS,
+  MAX_OPEN_PRICE_DRIFT,
+  OPEN_FEE_LAMPORTS,
+  positionValue,
+  solPerToken,
+  STANDARD_POSITION_BINS,
+  type OpenOrder,
+  type PositionMark,
+} from "./lp-plan";
 import { decideSell, impactTooHigh } from "./sell-rule";
 
 export type SentOpen = { signature: string; position: string; minBinId: number; maxBinId: number; entryPrice: number };
+
+/** The position account landed but its liquidity did not all land. It must be closed for the rent. */
+export class IncompleteOpen extends Error {
+  constructor(
+    message: string,
+    readonly sent: SentOpen,
+  ) {
+    super(message);
+    this.name = "IncompleteOpen";
+  }
+}
+
+/** Account size of a position with `bins` bins (SDK `calculatePositionSize`). */
+export function positionBytes(bins: number): number {
+  return 8112 + Math.max(0, bins - STANDARD_POSITION_BINS) * 112;
+}
 
 export type SellResult = { sold: true; signature: string; outLamports: bigint } | { sold: false; reason: string };
 
@@ -68,6 +93,16 @@ type DlmmPool = {
     strategy: { minBinId: number; maxBinId: number; strategyType: number };
     slippage?: number;
   }): Promise<Transaction>;
+  createExtendedEmptyPosition(lowerBinId: number, upperBinId: number, position: PublicKey, owner: PublicKey): Promise<Transaction>;
+  addLiquidityByStrategyChunkable(args: {
+    positionPubKey: PublicKey;
+    user: PublicKey;
+    totalXAmount: BN;
+    totalYAmount: BN;
+    strategy: { minBinId: number; maxBinId: number; strategyType: number };
+    slippage?: number;
+  }): Promise<Transaction[]>;
+  closePosition(args: { owner: PublicKey; position: { publicKey: PublicKey } }): Promise<Transaction>;
   removeLiquidity(args: {
     user: PublicKey;
     position: PublicKey;
@@ -264,19 +299,41 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       }
       const position = Keypair.generate();
       const lamports = new BN(order.lamports);
-      const tx = await pool.initializePositionAndAddLiquidityByStrategy({
+      const deposit = {
         positionPubKey: position.publicKey,
         user: wallet.publicKey,
         totalXAmount: solIsY ? new BN(0) : lamports,
         totalYAmount: solIsY ? lamports : new BN(0),
         strategy: { minBinId, maxBinId, strategyType: sdk.StrategyType.BidAsk },
         slippage: slippagePct,
-      });
+      };
       const sent: SentOpen = { signature: "", position: position.publicKey.toBase58(), minBinId, maxBinId, entryPrice };
-      sent.signature = await commit(rpc, tx, [wallet, position], microLamports, (signature) => {
+      const journal = (signature: string) => {
         sent.signature = signature;
         onSigned({ ...sent, signature });
-      });
+      };
+      const width = maxBinId - minBinId + 1;
+      if (width <= STANDARD_POSITION_BINS) {
+        const tx = await pool.initializePositionAndAddLiquidityByStrategy(deposit);
+        sent.signature = await commit(rpc, tx, [wallet, position], microLamports, journal);
+        return sent;
+      }
+      // Wider than one standard account: create the extended account, then deposit in chunks.
+      const rentLamports = await rpc.getMinimumBalanceForRentExemption(positionBytes(width));
+      const balance = await rpc.getBalance(wallet.publicKey, "confirmed");
+      if (balance < order.lamports + rentLamports + OPEN_FEE_LAMPORTS) {
+        throw new Error(`Falta SOL para el alquiler de ${(rentLamports / 1_000_000_000).toFixed(4)} SOL de una posición de ${width} bins. No se abre.`);
+      }
+      const create = await pool.createExtendedEmptyPosition(minBinId, maxBinId, position.publicKey, wallet.publicKey);
+      sent.signature = await commit(rpc, create, [wallet, position], microLamports, journal);
+      try {
+        const chunks = await pool.addLiquidityByStrategyChunkable(deposit);
+        if (chunks.length === 0) throw new Error("El depósito no armó ninguna transacción.");
+        for (const tx of chunks) sent.signature = await commit(rpc, tx, [wallet], microLamports, journal);
+      } catch (error) {
+        const why = error instanceof Error ? error.message : "El depósito falló.";
+        throw new IncompleteOpen(`La posición se creó pero la liquidez no entró completa. ${why}`.slice(0, 280), { ...sent });
+      }
       return sent;
     },
     async close(position, onSigned) {
@@ -288,14 +345,19 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const existing = await rpc.getAccountInfo(pubkey);
       if (!existing) return "already-closed";
       const pool = await poolOf(rpc, position.address);
-      const txs = await pool.removeLiquidity({
-        user: wallet.publicKey,
-        position: pubkey,
-        fromBinId: position.minBinId,
-        toBinId: position.maxBinId,
-        bps: new BN(10_000),
-        shouldClaimAndClose: true,
-      });
+      const held = (await pool.getPosition(pubkey)).positionData;
+      const empty = [held.totalXAmount, held.totalYAmount, held.feeX.toString(), held.feeY.toString()].every((amount) => Number(amount) === 0);
+      // A position whose deposit never landed has nothing to remove; it is only closed for the rent.
+      const txs = empty
+        ? [await pool.closePosition({ owner: wallet.publicKey, position: { publicKey: pubkey } })]
+        : await pool.removeLiquidity({
+            user: wallet.publicKey,
+            position: pubkey,
+            fromBinId: position.minBinId,
+            toBinId: position.maxBinId,
+            bps: new BN(10_000),
+            shouldClaimAndClose: true,
+          });
       if (txs.length === 0) throw new Error("El cierre no armó ninguna transacción.");
       let signature = "";
       for (const tx of txs) signature = await commit(rpc, tx, [wallet], microLamports, onSigned);

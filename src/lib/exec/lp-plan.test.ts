@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { PAPER_LIVE_PARAMS } from "./live-params";
-import { binsBelow, liveCandidates, openLamports, planLiveLp, positionRange, positionValue, RECENTER_ABOVE, solPerToken, type LiveCandidate, type PositionMark } from "./lp-plan";
+import {
+  binsBelow,
+  liveCandidates,
+  openLamports,
+  planLiveLp,
+  POSITION_RENT_LAMPORTS,
+  positionRange,
+  positionRentLamports,
+  positionValue,
+  RECENTER_ABOVE,
+  solPerToken,
+  type LiveCandidate,
+  type PositionMark,
+} from "./lp-plan";
 import type { LivePosition } from "./live-book";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
@@ -152,6 +165,40 @@ describe("live open plan", () => {
     expect(plan.open?.range).toBe(0.74);
     expect(plan.open?.bins).toBe(69);
     expect(plan.notice).toMatch(/74%/);
+  });
+
+  it("places the full 75% on 1% pools when extended positions are allowed", () => {
+    expect(positionRange(0.75, 100, 200)).toEqual({ range: 0.75, bins: 140 });
+    expect(positionRange(0.75, 125, 200)).toEqual({ range: 0.75, bins: 112 });
+    expect(positionRange(0.75, 200, 200)).toEqual({ range: 0.75, bins: 71 });
+    expect(positionRange(0.75, 50, 200)).toBeNull();
+    expect(binsBelow(0.75, 1, 5_000)).toBeNull();
+    expect(positionRentLamports(69)).toBe(POSITION_RENT_LAMPORTS);
+    expect(positionRentLamports(140)).toBe(POSITION_RENT_LAMPORTS + 70 * 600_000);
+  });
+
+  it("opens the 1% pool with more fees and reserves its larger rent", () => {
+    const wide = { ...candidate(100), address: "95zNQQ8juGpu8odzpbp63ZNtXuTnnBeBsHovUjpe32d8", name: "RETAIL-SOL", fees24h: 9_000 };
+    const input = {
+      running: true,
+      kill: false,
+      balanceLamports: 400_000_000,
+      reserveLamports: 30_000_000,
+      maxSol: 0.3,
+      params: { ...PAPER_LIVE_PARAMS, slot: 1 },
+      positions: [],
+      candidates: [wide, candidate(200)],
+      marks: {},
+      now: 2_000,
+      pendingOpen: false,
+      maxBins: 200,
+    };
+    const plan = planLiveLp(input);
+    expect(plan.open?.name).toBe("RETAIL-SOL");
+    expect(plan.open?.range).toBe(0.75);
+    expect(plan.open?.bins).toBe(140);
+    expect(plan.open?.lamports).toBe(400_000_000 - 30_000_000 - positionRentLamports(140) - 5_000_000);
+    expect(planLiveLp({ ...input, maxBins: 69 }).open?.name).toBe("WEFT-SOL");
   });
 
   it("closes on a sudden drop", () => {
