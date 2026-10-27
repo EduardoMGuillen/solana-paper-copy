@@ -6,6 +6,18 @@ Agrega una entrada cada vez que Claude haga un commit.
 
 ---
 
+## 2026-10-27 · `9d9ad65` · README al día con el código
+
+**Qué cambió (solo `README.md`):**
+- El tamaño de cada posición es el 25% del saldo de la wallet, no del SOL libre, con el tope de `LIVE_LP_MAX_SOL` y sin tocar `LIVE_MIN_SOL_RESERVE`.
+- Menciona que no abre un segundo pool de un token que ya tiene.
+- La tabla de perfiles muestra filtros y salidas de cada uno (Agresivo: +12% / −30% / 48 h).
+- Secciones nuevas: costos por posición (renta, bin arrays, priority fee), Telegram y archivo `KILL`, y la carpeta `landing/`.
+- Aviso de que la guía de la VM y `install.sh` siguen describiendo el bot de papel; para esta rama hay que correrlo con `BRANCH=pollotraderbot`.
+
+**Pendiente / ojo:**
+- `deploy/GUIA-GOOGLE-CLOUD.md`, `deploy/install.sh` y `docs/EJECUCION-REAL.md` siguen desactualizados.
+
 ## 2026-10-26 · `71d001d` · App de escritorio: una sola copia de web3.js
 
 **Qué cambió:**
