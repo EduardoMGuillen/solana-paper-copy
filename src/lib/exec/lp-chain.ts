@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, type Transaction } from "@solana/web3.js";
 import BN from "bn.js";
-import { DEFAULT_RPC, encodeBase58, readWalletAddress } from "./wallet";
+import { encodeBase58, readWalletAddress, rpcUrl } from "./wallet";
 import { WSOL } from "../lp/meteora";
 import type { LivePosition } from "./live-book";
 import {
@@ -125,7 +125,7 @@ function loadKeypair(dir: string): Keypair {
 }
 
 function connection(env: Record<string, string | undefined>): Connection {
-  return new Connection(env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC, "confirmed");
+  return new Connection(rpcUrl(env), "confirmed");
 }
 
 type DlmmSdk = {

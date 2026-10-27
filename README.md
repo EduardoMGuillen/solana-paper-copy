@@ -44,6 +44,7 @@ Es **un solo mes**. El historial solo trae los pools que siguen vivos y usa el T
 
 - **Cerrar la ventana no detiene el bot.** La app queda en la bandeja del sistema, junto al reloj, y sigue vigilando las posiciones abiertas. Para apagarla del todo usa bandeja → **Salir (detiene el bot)**.
 - **Configuración:** bandeja → *Abrir configuración* abre la carpeta de datos. Ahí está `config.env`, con Telegram, RPC propio y los límites `LIVE_*`; la plantilla es [.env.example](.env.example). Después de cambiarlo, sal y vuelve a abrir la app.
+- **Reembolsos de Helius:** con un RPC de Helius la app agrega `rebate-address` a la URL, y por defecto los reembolsos de MEV van a la wallet del autor (`J723mhkAUyjKrR469XfHeMC2wGfcCU6EACMQtW6dQDBd`). Para cobrarlos tú, pon tu dirección en `HELIUS_REBATE_ADDRESS`; para desactivarlo, pon `off`.
 - **Log del servidor:** `logs/server.log`, en esa misma carpeta.
 
 ### Generar los instaladores

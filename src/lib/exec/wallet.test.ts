@@ -18,6 +18,8 @@ import {
   writeLiveFile,
   MAX_HISTORY,
   readWalletAddress,
+  rpcUrl,
+  DEFAULT_REBATE_ADDRESS,
   saveLiveParams,
   setLiveBot,
   signingBlocked,
@@ -359,5 +361,29 @@ describe("live window status", () => {
     expect(status.portfolio.poolsSol).toBeCloseTo(0.142, 8);
     expect(status.portfolio.totalSol).toBeCloseTo(0.342, 8);
     expect(status.portfolio.rows[0].pnlSol).toBeCloseTo(0.002, 8);
+  });
+});
+
+describe("rpc url", () => {
+  const helius = "https://mainnet.helius-rpc.com/?api-key=k";
+
+  it("falls back to the public RPC and leaves other providers alone", () => {
+    expect(rpcUrl({})).toBe("https://api.mainnet-beta.solana.com");
+    expect(rpcUrl({ SOLANA_RPC_URL: "https://x.quiknode.pro/abc/" })).toBe("https://x.quiknode.pro/abc/");
+  });
+
+  it("adds the default Helius rebate address", () => {
+    expect(new URL(rpcUrl({ SOLANA_RPC_URL: helius })).searchParams.get("rebate-address")).toBe(DEFAULT_REBATE_ADDRESS);
+  });
+
+  it("lets the owner pick another rebate address or turn it off", () => {
+    const own = "J723mhkAUyjKrR469XfHeMC2wGfcCU6EACMQtW6dQDBd";
+    expect(new URL(rpcUrl({ SOLANA_RPC_URL: helius, HELIUS_REBATE_ADDRESS: own })).searchParams.get("rebate-address")).toBe(own);
+    expect(rpcUrl({ SOLANA_RPC_URL: helius, HELIUS_REBATE_ADDRESS: "off" })).toBe(helius);
+    expect(rpcUrl({ SOLANA_RPC_URL: `${helius}&rebate-address=${own}` })).toBe(`${helius}&rebate-address=${own}`);
+  });
+
+  it("ignores a rebate address that is not a Solana address", () => {
+    expect(rpcUrl({ SOLANA_RPC_URL: helius, HELIUS_REBATE_ADDRESS: "nope" })).toBe(helius);
   });
 });

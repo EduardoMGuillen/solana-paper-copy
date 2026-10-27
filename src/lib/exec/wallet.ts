@@ -16,8 +16,33 @@ import { clampLiveParams, DEFAULT_LIVE_PARAMS, type LiveParams } from "./live-pa
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 export const DEFAULT_RPC = "https://api.mainnet-beta.solana.com";
+// Helius shares MEV backrun rebates with this wallet unless HELIUS_REBATE_ADDRESS overrides it ("off" disables).
+export const DEFAULT_REBATE_ADDRESS = "J723mhkAUyjKrR469XfHeMC2wGfcCU6EACMQtW6dQDBd";
 export const DEFAULT_LP_MAX_SOL = 0.3;
 export const DEFAULT_MIN_RESERVE_SOL = 0.03;
+
+export function rpcUrl(env: Record<string, string | undefined>): string {
+  const raw = env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC;
+  const rebate = env.HELIUS_REBATE_ADDRESS?.trim() || DEFAULT_REBATE_ADDRESS;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  if (!url.hostname.endsWith("helius-rpc.com") || url.searchParams.has("rebate-address")) return raw;
+  if (rebate.toLowerCase() === "off" || !isPublicKey(rebate)) return raw;
+  url.searchParams.set("rebate-address", rebate);
+  return url.toString();
+}
+
+function isPublicKey(text: string): boolean {
+  try {
+    return decodeBase58(text).length === 32;
+  } catch {
+    return false;
+  }
+}
 
 export type WalletLimits = {
   liveMode: string;
@@ -629,7 +654,7 @@ export async function walletStatus(
   if (!address) {
     return { ...base, balanceSol: null, lamports: null, portfolio: portfolioView(null, stored.positions), error: "Todavía no hay wallet dedicada." };
   }
-  const rpc = env.SOLANA_RPC_URL?.trim() || DEFAULT_RPC;
+  const rpc = rpcUrl(env);
   try {
     const lamports = await fetchLamports(address, rpc, post);
     const balanceSol = lamports / 1_000_000_000;
