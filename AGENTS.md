@@ -40,13 +40,13 @@ Before you say a change is done, run **typecheck, lint, tests and build**. All f
 ```
 src/instrumentation.ts ─► src/lib/live-loop.ts (every 15 s)
                             ├─ kickLiveLp()           exec/lp-runner.ts: reconcile, mark, close, retry leftovers, open
-                            └─ kickTelegramCommands() exec/telegram-control.ts: saldo, estado, cerrar, stop
+                            └─ kickTelegramCommands() exec/telegram-control.ts: balance, status, close, stop
 UI: src/app/page.tsx → src/components/wallet-live.tsx, polls /api/wallet every 15 s; Start/Stop/params/close via POST /api/wallet
 Auth: src/proxy.ts (HTTP Basic auth when BOT_PASSWORD is set; otherwise localhost only)
 
 Desktop (desktop/main.ts, Electron):
   utilityProcess runs the Next standalone server on 127.0.0.1:<free port>
-  BrowserWindow shows it; closing hides to the tray, "Salir" stops the server
+  BrowserWindow shows it; closing hides to the tray, "Quit" stops the server
   config: <userData>/config.env (from .env.example), log: <userData>/logs/server.log
   wallet import: page → preload (window.pollo) → IPC "wallet:import" → importDedicatedWallet(); never over HTTP
 ```
@@ -60,7 +60,7 @@ Desktop (desktop/main.ts, Electron):
 | `src/lib/exec/lp-chain.ts` | Meteora live signing: open, close, sell, read position value. The only file that opens the key to sign. Loads the DLMM SDK through `load-dlmm.cjs` at a runtime path. |
 | `src/lib/exec/lp-runner.ts` | Meteora live pass. |
 | `src/lib/exec/wallet.ts` | Wallet files (create, import), live book (`bot.json`), status for the dashboard. |
-| `src/lib/exec/intents.ts`, `live-book.ts`, `live-params.ts`, `sell-rule.ts` | Intent journal, positions, parameters and presets (Recomendado is the default), leftover-token sales. |
+| `src/lib/exec/intents.ts`, `live-book.ts`, `live-params.ts`, `sell-rule.ts` | Intent journal, positions, parameters and presets (Recommended is the default), leftover-token sales. |
 | `src/lib/lp/*` | Meteora: `bidask.ts` (position math), `meteora.ts` (API parsing, screen, forward test), `datapi.ts`, `history.ts`. |
 | `src/lib/bot/market.ts` | SOL/USD price for the dashboard and Telegram. |
 | `src/lib/notify/telegram.ts` | Live alerts and owner commands. |

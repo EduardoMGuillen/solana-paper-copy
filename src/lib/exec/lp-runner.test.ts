@@ -105,7 +105,7 @@ describe("live cycle", () => {
     await runLiveCycle(dir, chain(50_000_000, calls), async () => [candidate()], { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" }, 10_000);
     expect(calls).toEqual([]);
     expect(readLiveFile(dir).positions).toHaveLength(0);
-    expect(readLiveFile(dir).notice).toMatch(/reserva|No se envió/);
+    expect(readLiveFile(dir).notice).toMatch(/reserve|Nothing sent/);
   });
 
   it("stop closes the open position on the next pass", async () => {
@@ -148,13 +148,13 @@ describe("live cycle", () => {
     const used = chain(2_000_000_000, calls);
     used.sell = async () => {
       calls.push("sell");
-      throw new Error("La simulación rechazó la venta.");
+      throw new Error("Simulation rejected the sale.");
     };
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     setLiveBot(dir, false);
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     expect(readLiveFile(dir).positions).toHaveLength(0);
-    expect(readLiveFile(dir).notice).toMatch(/se quedó/);
+    expect(readLiveFile(dir).notice).toMatch(/stayed in the wallet/);
     expect(readIntents(dir).some((intent) => intent.kind === "sell" && intent.status === "failed")).toBe(true);
 
     const again = tempDir();
@@ -190,11 +190,11 @@ describe("live cycle", () => {
       calls.push("open");
       onSigned({ signature: "sigopen", position: positionKey, minBinId: 100, maxBinId: 156, entryPrice: 0.001 });
       onChain.add(positionKey);
-      throw new Error("El RPC no respondió la confirmación.");
+      throw new Error("The RPC did not answer the confirmation.");
     };
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     expect(readLiveFile(dir).positions).toHaveLength(0);
-    expect(readLiveFile(dir).notice).toMatch(/se revisa en la cadena/);
+    expect(readLiveFile(dir).notice).toMatch(/checking on chain/);
     expect(readIntents(dir).some((intent) => intent.status === "failed")).toBe(false);
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     const book = readLiveFile(dir);
@@ -212,11 +212,11 @@ describe("live cycle", () => {
     const used = chain(2_000_000_000, calls);
     used.open = async () => {
       calls.push("open");
-      throw new Error("Este rango necesita crear 2 bin array(s).");
+      throw new Error("This range needs 2 new bin array(s).");
     };
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     expect(readLiveFile(dir).skipped[pool]).toBeGreaterThan(10_000);
-    expect(readLiveFile(dir).notice).toMatch(/pausa 6 h/);
+    expect(readLiveFile(dir).notice).toMatch(/paused for 6 h/);
     await runLiveCycle(dir, used, async () => [candidate()], env, 20_000);
     expect(calls).toEqual(["open"]);
   });
@@ -234,7 +234,7 @@ describe("live cycle", () => {
       const sent = { signature: "sigcreate", position: positionKey, minBinId: 100, maxBinId: 239, entryPrice: 0.001 };
       onSigned(sent);
       onChain.add(positionKey);
-      throw new IncompleteOpen("La posición se creó pero la liquidez no entró completa.", sent);
+      throw new IncompleteOpen("Position created but liquidity was only partly deposited.", sent);
     };
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     let book = readLiveFile(dir);
@@ -279,7 +279,7 @@ describe("live cycle", () => {
     await runLiveCycle(dir, used, async () => [candidate()], env, 10_000);
     expect(closeLivePosition(dir, pool).error).toBeNull();
     await runLiveCycle(dir, used, async () => {
-      throw new Error("Meteora respondió 503");
+      throw new Error("Meteora returned 503");
     }, env, 20_000);
     expect(calls).toEqual(["open", "close", "sell"]);
     expect(readLiveFile(dir).positions).toHaveLength(0);
@@ -295,7 +295,7 @@ describe("live cycle", () => {
     let liquid = false;
     used.sell = async (_target, onSigned) => {
       calls.push("sell");
-      if (!liquid) return { sold: false, reason: "La venta pasaría el tope de impacto. El token se quedó en la wallet." };
+      if (!liquid) return { sold: false, reason: "The sale would exceed the impact cap. The token stayed in the wallet." };
       onSigned("sigsell");
       return { sold: true, signature: "sigsell", outLamports: BigInt(50_000_000) };
     };
@@ -327,7 +327,7 @@ describe("live cycle", () => {
     await sendLiveDigest(dir, env, 1_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { text: string };
-    expect(body.text).toContain("0 abiertas");
+    expect(body.text).toContain("0 open");
     expect(body.text).not.toContain("SECRET");
     expect(readLiveFile(dir).digestAt).toBe(1_000);
     await sendLiveDigest(dir, env, 1_000 + 60_000);

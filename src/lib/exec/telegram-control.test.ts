@@ -81,7 +81,7 @@ describe("telegram commands", () => {
     const sent: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);
-      if (target.includes("getUpdates")) return updates([{ id: 1, chat: "42", text: "cerrar" }, { id: 2, chat: "42", text: "abrir" }]);
+      if (target.includes("getUpdates")) return updates([{ id: 1, chat: "42", text: "close" }, { id: 2, chat: "42", text: "abrir" }]);
       if (target.includes("sendMessage")) {
         sent.push(JSON.parse(String(init?.body)).text as string);
         return new Response("{}", { status: 200 });
@@ -92,7 +92,7 @@ describe("telegram commands", () => {
     expect(readLiveFile(dir).running).toBe(true);
     expect(readLiveFile(dir).positions[0]?.closing).toBe(true);
     expect(readLiveFile(dir).positions[0]?.closeReason).toBe("manual");
-    expect(sent[0]).toContain("Cerrando");
-    expect(sent[1]).toContain("no se enciende");
+    expect(sent[0]).toContain("Closing");
+    expect(sent[1]).toContain("cannot be started");
   });
 });

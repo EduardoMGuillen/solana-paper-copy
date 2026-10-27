@@ -194,23 +194,23 @@ export function choosePool(
 function markAt(position: LivePosition, mark: PositionMark | undefined, now: number, params: LiveParams): LivePosition {
   if (position.closing) return position;
   if (now - position.openedAt >= params.holdHours * 3_600_000) {
-    return { ...position, closing: true, closeReason: "time", note: "Se cumplió el tiempo. Cerrando." };
+    return { ...position, closing: true, closeReason: "time", note: "Time is up. Closing." };
   }
-  if (!mark) return { ...position, note: "No se pudo leer la posición en la cadena. Solo corre el cierre por tiempo." };
-  if (!mark.exists) return { ...position, closing: true, closeReason: "gone", note: "La posición ya no está en la cadena." };
+  if (!mark) return { ...position, note: "Could not read the position on chain. Only the time exit applies." };
+  if (!mark.exists) return { ...position, closing: true, closeReason: "gone", note: "The position is no longer on chain." };
   const price = mark.price > 0 ? mark.price : null;
   const stake = position.stakeSol * 1_000_000_000;
   const positionPct = stake > 0 && Number.isFinite(mark.valueLamports) ? mark.valueLamports / stake - 1 : null;
   const tokenPct = price && position.entryPrice ? price / position.entryPrice - 1 : null;
   const marked: LivePosition = { ...position, lastPrice: price ?? position.lastPrice, tokenPct, positionPct, note: "" };
   if (price && position.lastPrice && price / position.lastPrice <= 0.8) {
-    return { ...marked, closing: true, closeReason: "rug", note: "El precio cayó de golpe. Cerrando." };
+    return { ...marked, closing: true, closeReason: "rug", note: "Price dropped sharply. Closing." };
   }
   // No re-center when the token runs up: in the Sep–Oct 2026 hourly backtest that close-and-reopen
   // churn was 3 of every 4 exits, earned almost no fees and paid fees on every round trip.
   if (positionPct == null) return marked;
-  if (positionPct >= params.takeProfit) return { ...marked, closing: true, closeReason: "take-profit", note: "Llegó a la toma. Cerrando." };
-  if (positionPct <= -params.stopLoss) return { ...marked, closing: true, closeReason: "loss", note: "Llegó al stop. Cerrando." };
+  if (positionPct >= params.takeProfit) return { ...marked, closing: true, closeReason: "take-profit", note: "Take profit hit. Closing." };
+  if (positionPct <= -params.stopLoss) return { ...marked, closing: true, closeReason: "loss", note: "Stop hit. Closing." };
   return marked;
 }
 
@@ -234,16 +234,16 @@ export function planLiveLp(input: {
   const maxBins = input.maxBins ?? MAX_POSITION_BINS;
   const positions = input.positions.map((position) => {
     if (input.kill && position.signature && !position.closing) {
-      return { ...position, closing: true, closeReason: "stop" as const, note: "Corte de emergencia. Cerrando." };
+      return { ...position, closing: true, closeReason: "stop" as const, note: "Emergency stop. Closing." };
     }
     return markAt(position, input.marks[position.address], input.now, input.params);
   });
   const closing = positions.some((position) => position.closing);
   if (input.kill || !input.running) {
-    return { positions, open: null, notice: input.kill ? "Corte de emergencia: no se abren posiciones." : closing ? "Cerrando lo que queda abierto." : "Apagado." };
+    return { positions, open: null, notice: input.kill ? "Emergency stop: no positions open." : closing ? "Closing whatever is still open." : "Stopped." };
   }
   if (closing || input.pendingOpen) {
-    return { positions, open: null, notice: input.pendingOpen ? "Hay una apertura a medias. No se abre otra hasta confirmarla." : "Primero se cierran las que ya pidieron salida." };
+    return { positions, open: null, notice: input.pendingOpen ? "An open is half-done. No new open until it is confirmed." : "Closing positions that already hit an exit first." };
   }
   // A token held in one pool blocks its other pools: two pools of one memecoin double the same risk.
   const busy = new Set(positions.flatMap((position) => (position.tokenMint ? [position.address, position.tokenMint] : [position.address])));
@@ -261,10 +261,10 @@ export function planLiveLp(input: {
     slot: input.params.slot,
   });
   if (!pool || !shaped || lamports <= 0) {
-    const why = lamports <= 0 ? "El SOL libre no alcanza para una posición y la reserva." : "Ningún pool que pase el filtro cabe en una sola posición con este rango.";
-    return { positions, open: null, notice: `${why} No se envió nada.` };
+    const why = lamports <= 0 ? "Free SOL is not enough for a position plus the reserve." : "No pool that passes the filter fits in a single position with this range.";
+    return { positions, open: null, notice: `${why} Nothing sent.` };
   }
-  const width = shaped.range < input.params.range ? ` al ${Math.round(shaped.range * 100)}%` : "";
+  const width = shaped.range < input.params.range ? ` at ${Math.round(shaped.range * 100)}%` : "";
   return {
     positions,
     open: {
@@ -278,6 +278,6 @@ export function planLiveLp(input: {
       range: shaped.range,
       binStepBps: binStepBps(pool.binStep) ?? 0,
     },
-    notice: `Abriendo ${pool.name}${width}.`,
+    notice: `Opening ${pool.name}${width}.`,
   };
 }

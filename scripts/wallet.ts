@@ -9,7 +9,7 @@ import { createDedicatedWallet, importDedicatedWallet, walletDir } from "../src/
 /** Read one line from the terminal without echoing it, so the key never lands in scrollback or shell history. */
 function readHidden(prompt: string): Promise<string> {
   const stdin = process.stdin;
-  if (!stdin.isTTY) throw new Error("Corre el import en una terminal: la clave se escribe oculta.");
+  if (!stdin.isTTY) throw new Error("Run the import in a terminal: the key is typed hidden.");
   process.stdout.write(prompt);
   stdin.setRawMode(true);
   stdin.resume();
@@ -27,7 +27,7 @@ function readHidden(prompt: string): Promise<string> {
     const onData = (chunk: string) => {
       for (const char of chunk) {
         if (char === "\r" || char === "\n") return done();
-        if (char === "\u0003") return done(new Error("Cancelado."));
+        if (char === "\u0003") return done(new Error("Cancelled."));
         if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
         else value += char;
       }
@@ -39,7 +39,7 @@ function readHidden(prompt: string): Promise<string> {
 async function main() {
   const [command, expected] = process.argv.slice(2);
   if (command === "import") {
-    const secret = await readHidden("Clave privada (no se muestra): ");
+    const secret = await readHidden("Private key (hidden): ");
     process.stdout.write(`${importDedicatedWallet(walletDir(), secret, expected)}\n`);
     return;
   }
@@ -47,6 +47,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : "No se pudo."}\n`);
+  process.stderr.write(`${error instanceof Error ? error.message : "Failed."}\n`);
   process.exit(1);
 });

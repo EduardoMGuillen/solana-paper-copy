@@ -116,13 +116,13 @@ export function encodeBase58(bytes: Uint8Array): string {
 
 export function decodeBase58(text: string): Uint8Array {
   const value = text.trim();
-  if (!value) throw new Error("dirección vacía");
+  if (!value) throw new Error("empty address");
   let zeros = 0;
   while (zeros < value.length && value[zeros] === "1") zeros += 1;
   const bytes = [0];
   for (let i = zeros; i < value.length; i += 1) {
     const digit = ALPHABET.indexOf(value[i]);
-    if (digit < 0) throw new Error("dirección inválida");
+    if (digit < 0) throw new Error("invalid address");
     let carry = digit;
     for (let j = 0; j < bytes.length; j += 1) {
       carry += bytes[j] * 58;
@@ -150,13 +150,13 @@ export function assertOutsideRepo(dir: string, cwd = process.cwd()): void {
   const resolved = path.resolve(/*turbopackIgnore: true*/ dir);
   const root = path.resolve(/*turbopackIgnore: true*/ cwd);
   const nested = resolved === root || resolved.startsWith(root + path.sep);
-  if (nested) throw new Error("La wallet no puede vivir dentro del proyecto.");
+  if (nested) throw new Error("The wallet cannot live inside the project folder.");
 }
 
 export function signingBlocked(kill: boolean, running = false): string {
-  if (kill) return "Corte de emergencia activo. No se abren posiciones.";
-  if (running) return "Encendido: firma aperturas y cierres de Meteora dentro de los límites.";
-  return "Apagado: no firma. Start abre posiciones reales con esta wallet.";
+  if (kill) return "Emergency stop active. No positions open.";
+  if (running) return "Running: signs Meteora opens and closes within the limits.";
+  return "Stopped: not signing. Start opens real positions with this wallet.";
 }
 
 function limitsFrom(env: Record<string, string | undefined>): WalletLimits {
@@ -186,7 +186,7 @@ export function readWalletAddress(dir: string): string | null {
   if (!fs.existsSync(file)) return null;
   const address = fs.readFileSync(file, "utf8").trim();
   const decoded = decodeBase58(address);
-  if (decoded.length !== 32) throw new Error("La dirección de la wallet no es una clave pública.");
+  if (decoded.length !== 32) throw new Error("The wallet address is not a public key.");
   return address;
 }
 
@@ -204,10 +204,10 @@ function keypairBytes(): { secret: Buffer; address: string } {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const pkcs8 = privateKey.export({ type: "pkcs8", format: "der" });
   const spki = publicKey.export({ type: "spki", format: "der" });
-  if (pkcs8.length < 32 || spki.length < 32) throw new Error("No se pudo generar la clave.");
+  if (pkcs8.length < 32 || spki.length < 32) throw new Error("Could not generate the key.");
   const seed = pkcs8.subarray(pkcs8.length - 32);
   const pub = Buffer.from(spki.subarray(spki.length - 32));
-  if (!publicFromSeed(Buffer.from(seed)).equals(pub)) throw new Error("La clave pública no corresponde a la semilla.");
+  if (!publicFromSeed(Buffer.from(seed)).equals(pub)) throw new Error("The public key does not match the seed.");
   return { secret: Buffer.concat([seed, pub]), address: encodeBase58(pub) };
 }
 
@@ -224,7 +224,7 @@ export function createDedicatedWallet(dir: string, cwd = process.cwd()): string 
   if (!fs.existsSync(journal)) fs.writeFileSync(journal, "", { encoding: "utf8" });
   if (fs.existsSync(publicPath) && fs.existsSync(secretPath)) return readWalletAddress(dir) ?? "";
   if (fs.existsSync(secretPath) || fs.existsSync(publicPath)) {
-    throw new Error("La wallet está a medias. No se genera otra encima.");
+    throw new Error("The wallet is half-written. Not generating another on top of it.");
   }
   const { secret, address } = keypairBytes();
   fs.writeFileSync(secretPath, JSON.stringify([...secret]), { encoding: "utf8", mode: 0o600 });
@@ -232,7 +232,7 @@ export function createDedicatedWallet(dir: string, cwd = process.cwd()): string 
   return address;
 }
 
-const BAD_SECRET = "Eso no es una clave privada de Solana. Pega la de Phantom (base58) o el arreglo de solana-keygen.";
+const BAD_SECRET = "That is not a Solana private key. Paste the one from Phantom (base58) or the solana-keygen array.";
 
 /** Phantom exports base58; solana-keygen writes a JSON array. Errors never repeat the input. */
 function parseSecret(text: string): Buffer {
@@ -263,16 +263,16 @@ export function importDedicatedWallet(dir: string, secretText: string, expectedA
   const secret = parseSecret(secretText);
   const seed = secret.subarray(0, 32);
   const pub = secret.subarray(32);
-  if (!publicFromSeed(Buffer.from(seed)).equals(pub)) throw new Error("La clave privada no es válida: su mitad pública no corresponde.");
+  if (!publicFromSeed(Buffer.from(seed)).equals(pub)) throw new Error("Invalid private key: its public half does not match.");
   const address = encodeBase58(pub);
-  if (expectedAddress?.trim() && expectedAddress.trim() !== address) throw new Error("La clave no corresponde a la dirección que indicaste.");
+  if (expectedAddress?.trim() && expectedAddress.trim() !== address) throw new Error("The key does not match the address you entered.");
 
   fs.mkdirSync(dir, { recursive: true });
   const secretPath = secretFile(dir);
   const publicPath = addressFile(dir);
   if (fs.existsSync(secretPath) || fs.existsSync(publicPath)) {
     if (readWalletAddress(dir) === address && fs.existsSync(secretPath)) return address;
-    throw new Error("Ya hay una wallet en esa carpeta. Muévela a mano antes de importar otra; puede tener fondos o posiciones.");
+    throw new Error("There is already a wallet in that folder. Move it by hand before importing another; it may hold funds or positions.");
   }
   const journal = path.join(dir, "intents.jsonl");
   if (!fs.existsSync(journal)) fs.writeFileSync(journal, "", { encoding: "utf8" });
@@ -295,15 +295,15 @@ export function replaceDedicatedWallet(dir: string, secretText: string, expected
   const current = readWalletAddress(dir);
   if (!current) return importDedicatedWallet(dir, secretText, expectedAddress, cwd);
   const secret = parseSecret(secretText);
-  if (!publicFromSeed(Buffer.from(secret.subarray(0, 32))).equals(secret.subarray(32))) throw new Error("La clave privada no es válida: su mitad pública no corresponde.");
+  if (!publicFromSeed(Buffer.from(secret.subarray(0, 32))).equals(secret.subarray(32))) throw new Error("Invalid private key: its public half does not match.");
   const address = encodeBase58(secret.subarray(32));
-  if (expectedAddress.trim() && expectedAddress.trim() !== address) throw new Error("La clave no corresponde a la dirección que indicaste.");
+  if (expectedAddress.trim() && expectedAddress.trim() !== address) throw new Error("The key does not match the address you entered.");
   if (address === current) return current;
-  if (confirm.trim() !== current.slice(-4)) throw new Error("Escribe los últimos 4 caracteres de la wallet actual para confirmar.");
+  if (confirm.trim() !== current.slice(-4)) throw new Error("Type the last 4 characters of the current wallet to confirm.");
   const live = readLiveFile(dir);
-  if (live.running) throw new Error("Primero dale STOP al bot.");
-  if (live.positions.length > 0) throw new Error("Todavía hay posiciones abiertas con la wallet actual. Ciérralas antes de cambiarla.");
-  if (live.leftovers.length > 0) throw new Error("Quedan tokens por vender en la wallet actual. Espera a que el bot los venda.");
+  if (live.running) throw new Error("STOP the bot first.");
+  if (live.positions.length > 0) throw new Error("The current wallet still has open positions. Close them before changing it.");
+  if (live.leftovers.length > 0) throw new Error("The current wallet still has leftover tokens to sell. Wait for the bot to sell them.");
 
   const tag = `${current}-${stamp(now)}`;
   fs.renameSync(secretFile(dir), path.join(dir, `wallet-${tag}.json`));
@@ -319,9 +319,9 @@ export async function probeRpc(url: string, post: RpcPost = fetch): Promise<void
   try {
     parsed = new URL(url.trim());
   } catch {
-    throw new Error("No es una URL válida.");
+    throw new Error("Not a valid URL.");
   }
-  if (parsed.protocol !== "https:") throw new Error("La URL del RPC tiene que empezar con https://");
+  if (parsed.protocol !== "https:") throw new Error("The RPC URL must start with https://");
   let body: { result?: unknown } | null = null;
   try {
     const response = await post(parsed.toString(), {
@@ -334,7 +334,7 @@ export async function probeRpc(url: string, post: RpcPost = fetch): Promise<void
   } catch {
     body = null;
   }
-  if (typeof body?.result !== "number") throw new Error("El RPC no respondió. Revisa la URL y la API key.");
+  if (typeof body?.result !== "number") throw new Error("The RPC did not respond. Check the URL and the API key.");
 }
 
 /** Wallet SOL plus each position's marked liquidity and its account rent. */
@@ -374,22 +374,22 @@ export function withSolUsd(status: WalletStatus, solUsd: number | null): WalletS
 
 export function parseAccountLamports(body: unknown, count: number): number[] {
   const record = (body ?? {}) as { result?: { value?: unknown }; error?: { message?: string } };
-  if (record.error) throw new Error(record.error.message || "El RPC rechazó las cuentas.");
+  if (record.error) throw new Error(record.error.message || "The RPC rejected the accounts request.");
   const value = record.result?.value;
-  if (!Array.isArray(value) || value.length !== count) throw new Error("El RPC no devolvió las cuentas.");
+  if (!Array.isArray(value) || value.length !== count) throw new Error("The RPC did not return the accounts.");
   return value.map((row) => {
     if (row == null) return 0;
     const lamports = (row as { lamports?: unknown }).lamports;
-    if (typeof lamports !== "number" || !Number.isInteger(lamports) || lamports < 0) throw new Error("El RPC no devolvió el alquiler.");
+    if (typeof lamports !== "number" || !Number.isInteger(lamports) || lamports < 0) throw new Error("The RPC did not return the rent.");
     return lamports;
   });
 }
 
 export function parseLamports(body: unknown): number {
   const record = (body ?? {}) as { result?: { value?: unknown }; error?: { message?: string } };
-  if (record.error) throw new Error(record.error.message || "El RPC rechazó el saldo.");
+  if (record.error) throw new Error(record.error.message || "The RPC rejected the balance request.");
   const value = record.result?.value;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("El RPC no devolvió un saldo.");
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error("The RPC did not return a balance.");
   return value;
 }
 
@@ -403,7 +403,7 @@ export async function fetchAccountLamports(addresses: string[], rpcUrl: string, 
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [addresses, { encoding: "base64" }] }),
     signal: AbortSignal.timeout(8_000),
   });
-  if (!response.ok) throw new Error("El RPC no respondió las cuentas.");
+  if (!response.ok) throw new Error("The RPC did not answer the accounts request.");
   return parseAccountLamports(await response.json(), addresses.length);
 }
 
@@ -414,7 +414,7 @@ export async function fetchLamports(address: string, rpcUrl: string, post: RpcPo
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] }),
     signal: AbortSignal.timeout(8_000),
   });
-  if (!response.ok) throw new Error("El RPC no respondió el saldo.");
+  if (!response.ok) throw new Error("The RPC did not answer the balance request.");
   return parseLamports(await response.json());
 }
 
@@ -586,8 +586,8 @@ export function setLiveBot(dir: string, running: boolean, cwd = process.cwd()): 
   assertOutsideRepo(dir, cwd);
   const current = readLiveFile(dir);
   if (running && killFile(dir)) {
-    writeLiveFile(dir, { ...current, running: false, notice: "Corte de emergencia activo. No se abren posiciones." });
-    return { running: false, error: "Corte de emergencia activo. El bot sigue apagado." };
+    writeLiveFile(dir, { ...current, running: false, notice: "Emergency stop active. No positions open." });
+    return { running: false, error: "Emergency stop active. The bot stays stopped." };
   }
   if (!running) {
     const positions = closeAllPositions(current.positions);
@@ -596,11 +596,11 @@ export function setLiveBot(dir: string, running: boolean, cwd = process.cwd()): 
       ...current,
       running: false,
       positions,
-      notice: had === 0 ? "Stop: no había posiciones abiertas. El bot ya no abre." : "Stop está cerrando todas las posiciones.",
+      notice: had === 0 ? "Stop: no open positions. The bot no longer opens." : "Stop is closing all positions.",
     });
     return { running: false, error: null };
   }
-  writeLiveFile(dir, { ...current, running: true, notice: "Start: va a abrir posiciones reales con esta wallet. La reserva no se toca." });
+  writeLiveFile(dir, { ...current, running: true, notice: "Start: opening real positions with this wallet. The reserve is never touched." });
   return { running: true, error: null };
 }
 
@@ -609,8 +609,8 @@ export function closeLivePosition(dir: string, address: string, cwd = process.cw
   assertOutsideRepo(dir, cwd);
   const current = readLiveFile(dir);
   const result = closeOnePosition(current.positions, address);
-  if (!result.found) return { error: "Esa posición no está abierta." };
-  writeLiveFile(dir, { ...current, positions: result.positions, notice: "Cierre manual pedido. Si el pool sigue cumpliendo, se puede volver a abrir." });
+  if (!result.found) return { error: "That position is not open." };
+  writeLiveFile(dir, { ...current, positions: result.positions, notice: "Manual close requested. If the pool still qualifies, it can be reopened." });
   return { error: null };
 }
 
@@ -619,7 +619,7 @@ export function saveLiveParams(dir: string, raw: unknown, cwd = process.cwd()): 
   assertOutsideRepo(dir, cwd);
   const current = readLiveFile(dir);
   if (current.running && !killFile(dir)) {
-    return { params: current.params, error: "Para el bot para cambiar los parámetros." };
+    return { params: current.params, error: "Stop the bot to change the parameters." };
   }
   const params = clampLiveParams(raw, current.params);
   writeLiveFile(dir, { ...current, running: false, params });
@@ -660,7 +660,7 @@ export async function walletStatus(
       journal: 0,
       limits,
       portfolio: portfolioView(null, []),
-      error: cause instanceof Error ? cause.message : "Wallet fuera de lugar.",
+      error: cause instanceof Error ? cause.message : "Wallet in the wrong place.",
     };
   }
   let address: string | null = null;
@@ -685,7 +685,7 @@ export async function walletStatus(
       journal: journalCount(dir),
       limits,
       portfolio: portfolioView(null, []),
-      error: cause instanceof Error ? cause.message : "No se pudo leer la dirección.",
+      error: cause instanceof Error ? cause.message : "Could not read the address.",
     };
   }
   const kill = killFile(dir);
@@ -708,7 +708,7 @@ export async function walletStatus(
     balanceUsd: null,
   };
   if (!address) {
-    return { ...base, balanceSol: null, lamports: null, portfolio: portfolioView(null, stored.positions), error: "Todavía no hay wallet dedicada." };
+    return { ...base, balanceSol: null, lamports: null, portfolio: portfolioView(null, stored.positions), error: "No dedicated wallet yet." };
   }
   const rpc = rpcUrl(env);
   try {
@@ -722,7 +722,7 @@ export async function walletStatus(
       balanceSol: null,
       lamports: null,
       portfolio: portfolioView(null, stored.positions),
-      error: cause instanceof Error ? cause.message : "No se pudo leer el saldo.",
+      error: cause instanceof Error ? cause.message : "Could not read the balance.",
     };
   }
 }

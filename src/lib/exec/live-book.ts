@@ -72,7 +72,7 @@ function mark(position: LivePosition, reason: LiveCloseReason): LivePosition | n
     ...position,
     closing: true,
     closeReason: reason,
-    note: reason === "stop" ? "Stop está cerrando esta posición." : "Cierre manual en curso.",
+    note: reason === "stop" ? "Stop is closing this position." : "Manual close in progress.",
   };
 }
 

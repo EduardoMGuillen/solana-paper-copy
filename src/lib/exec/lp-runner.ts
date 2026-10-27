@@ -29,7 +29,7 @@ async function notifyLive(env: Record<string, string | undefined>, text: string)
     await sendTelegram(config, text);
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Telegram no respondió";
+    const message = error instanceof Error ? error.message : "Telegram did not respond";
     console.error("telegram live", message);
     return false;
   }
@@ -83,7 +83,7 @@ async function sellLeftover(dir: string, chain: LiveChain, target: SellTarget, e
     if (result.sold) {
       const outSol = Number(result.outLamports) / 1_000_000_000;
       appendIntent(dir, { ...base, status: "confirmed", signature: result.signature, lamports: Number(result.outLamports) });
-      await setNotice(dir, `${target.name}: token vendido por ${outSol.toFixed(4)} SOL.`);
+      await setNotice(dir, `${target.name}: token sold for ${outSol.toFixed(4)} SOL.`);
       await notifyLive(env, formatLiveSell({ name: target.name, outSol, signature: result.signature, note: null }));
       return true;
     }
@@ -94,17 +94,17 @@ async function sellLeftover(dir: string, chain: LiveChain, target: SellTarget, e
     appendIntent(dir, { ...base, status: "failed", error: result.reason.slice(0, 280) });
     const done = result.reason === DUST_SELL_REASON;
     if (loud) {
-      const retry = done ? "" : " Se reintenta cada 5 min.";
-      await setNotice(dir, `Cerrada ${target.name}. ${result.reason}${retry}`);
+      const retry = done ? "" : " Retrying every 5 min.";
+      await setNotice(dir, `Closed ${target.name}. ${result.reason}${retry}`);
       await notifyLive(env, formatLiveSell({ name: target.name, outSol: null, signature: null, note: `${result.reason}${retry}` }));
     }
     return done;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo vender el token.";
+    const message = error instanceof Error ? error.message : "Could not sell the token.";
     appendIntent(dir, { ...base, status: "failed", error: message.slice(0, 280) });
     if (loud) {
-      await setNotice(dir, `Cerrada ${target.name}. ${message} El token se quedó en la wallet. Se reintenta cada 5 min.`);
-      await notifyLive(env, formatLiveSell({ name: target.name, outSol: null, signature: null, note: `${message} Se reintenta cada 5 min.` }));
+      await setNotice(dir, `Closed ${target.name}. ${message} The token stayed in the wallet. Retrying every 5 min.`);
+      await notifyLive(env, formatLiveSell({ name: target.name, outSol: null, signature: null, note: `${message} Retrying every 5 min.` }));
     }
     return false;
   }
@@ -196,7 +196,7 @@ function positionFrom(order: OpenOrder, sent: SentOpen, now: number): LivePositi
     closeReason: null,
     tokenPct: 0,
     positionPct: 0,
-    note: "Abierta en la cadena.",
+    note: "Open on chain.",
   };
 }
 
@@ -244,7 +244,7 @@ async function closeOnChain(dir: string, chain: LiveChain, position: LivePositio
     appendIntent(dir, { ...base, status: "confirmed", signature });
     return signature;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo cerrar.";
+    const message = error instanceof Error ? error.message : "Could not close.";
     appendIntent(dir, { ...base, status: "failed", error: message.slice(0, 280) });
     throw error;
   }
@@ -277,7 +277,7 @@ async function reconcile(dir: string, chain: LiveChain, env: Record<string, stri
       // The book tracks one position per pool. A second one is closed instead of tracked.
       try {
         await closeOnChain(dir, chain, adopted, now);
-        await notifyLive(env, formatLiveNotice({ kind: "close", name: adopted.name, stakeSol: adopted.stakeSol, signature: null, reason: "duplicada" }));
+        await notifyLive(env, formatLiveNotice({ kind: "close", name: adopted.name, stakeSol: adopted.stakeSol, signature: null, reason: "duplicate" }));
       } catch {
         // Retried on the next pass: the account still exists and is still unknown.
       }
@@ -287,8 +287,8 @@ async function reconcile(dir: string, chain: LiveChain, env: Record<string, stri
       const fresh = readLiveFile(dir);
       writeLiveFile(dir, {
         ...fresh,
-        positions: [...fresh.positions, { ...adopted, note: "Recuperada de la cadena." }],
-        notice: `Se encontró en la cadena la posición de ${adopted.name}. Ya se sigue.`,
+        positions: [...fresh.positions, { ...adopted, note: "Recovered from chain." }],
+        notice: `Found ${adopted.name} position on chain. Now tracking it.`,
       });
     });
     await notifyLive(env, formatLiveNotice({ kind: "open", name: adopted.name, stakeSol: adopted.stakeSol, signature: adopted.signature }));
@@ -306,8 +306,8 @@ async function settlePending(dir: string, chain: LiveChain, file: LiveFile, now:
     return { notice: null, pending: true };
   }
   if (now - last.at < STALE_MS) return { notice: null, pending: true };
-  appendIntent(dir, { ...last, status: "failed", error: "La apertura no se confirmó." });
-  return { notice: "La apertura anterior no se confirmó. No se abrió otra.", pending: false };
+  appendIntent(dir, { ...last, status: "failed", error: "The open was not confirmed." });
+  return { notice: "The previous open was not confirmed. No new one opened.", pending: false };
 }
 
 async function readMarks(chain: LiveChain, positions: LivePosition[]): Promise<Record<string, PositionMark | undefined>> {
@@ -350,7 +350,7 @@ export async function runLiveCycle(
       [listed, balance] = await Promise.all([candidates(), chain.balanceLamports(address)]);
     } catch (error) {
       // Without a market nothing opens, but open positions are still marked and closed.
-      marketError = `${error instanceof Error ? error.message : "No se pudo leer el mercado."} No se abrió nada.`;
+      marketError = `${error instanceof Error ? error.message : "Could not read the market."} Nothing opened.`;
     }
   }
   const marks = await readMarks(chain, file.positions);
@@ -390,7 +390,7 @@ export async function runLiveCycle(
         writeLiveFile(dir, {
           ...fresh,
           positions: fresh.positions.filter((item) => item.address !== position.address),
-          notice: `Cerrada ${position.name}.`,
+          notice: `Closed ${position.name}.`,
           history: [...fresh.history, closedRow(position, signature, now)],
         });
       });
@@ -404,7 +404,7 @@ export async function runLiveCycle(
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo cerrar.";
+      const message = error instanceof Error ? error.message : "Could not close.";
       await withWallet(() => {
         const fresh = readLiveFile(dir);
         writeLiveFile(dir, {
@@ -452,17 +452,17 @@ export async function runLiveCycle(
       if (!fresh.running || killFile(dir)) {
         opened.closing = true;
         opened.closeReason = "stop";
-        opened.note = "Se abrió y el bot ya estaba apagado. Queda para cerrar.";
+        opened.note = "Opened after the bot was stopped. Queued to close.";
       }
       writeLiveFile(dir, {
         ...fresh,
         positions: [...fresh.positions.filter((position) => position.address !== opened.address), opened],
-        notice: `Abierta ${opened.name} con ${opened.stakeSol.toFixed(4)} SOL.`,
+        notice: `Opened ${opened.name} with ${opened.stakeSol.toFixed(4)} SOL.`,
       });
     });
     await notifyLive(env, formatLiveNotice({ kind: "open", name: order.name, stakeSol: order.lamports / 1_000_000_000, signature: sent.signature }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "No se pudo abrir.";
+    const message = error instanceof Error ? error.message : "Could not open.";
     if (error instanceof IncompleteOpen) {
       // The account is on chain without all its SOL. Track it and close it to get the rent back.
       appendIntent(dir, {
@@ -479,19 +479,19 @@ export async function runLiveCycle(
         const opened = positionFrom(order, error.sent, now);
         opened.closing = true;
         opened.closeReason = "stop";
-        opened.note = "La liquidez no entró completa. Se cierra para devolver el alquiler.";
+        opened.note = "Liquidity was only partly deposited. Closing to recover the rent.";
         writeLiveFile(dir, {
           ...fresh,
           positions: [...fresh.positions.filter((position) => position.address !== opened.address), opened],
           skipped: { ...fresh.skipped, [order.pool]: now + SKIP_POOL_MS },
-          notice: `${message.slice(0, 160)} ${order.name} se cierra y queda en pausa 6 h.`,
+          notice: `${message.slice(0, 160)} Closing ${order.name}; paused for 6 h.`,
         });
       });
       return;
     }
     if (signed) {
       // Signed and maybe broadcast: the chain decides. settlePending and reconcile pick it up.
-      await setNotice(dir, `${message.slice(0, 160)} La apertura de ${order.name} se firmó; se revisa en la cadena.`);
+      await setNotice(dir, `${message.slice(0, 160)} The ${order.name} open was signed; checking on chain.`);
       return;
     }
     appendIntent(dir, { ...pending, status: "failed", error: message.slice(0, 280) });
@@ -500,7 +500,7 @@ export async function runLiveCycle(
       writeLiveFile(dir, {
         ...fresh,
         skipped: { ...fresh.skipped, [order.pool]: now + SKIP_POOL_MS },
-        notice: `${message.slice(0, 200)} No se abrió nada. ${order.name} queda en pausa 6 h.`,
+        notice: `${message.slice(0, 200)} Nothing opened. ${order.name} paused for 6 h.`,
       });
     });
   }
@@ -514,7 +514,7 @@ export function kickLiveLp(now = Date.now()): void {
   const dir = walletDir();
   pending = runLiveCycle(dir, liveChain(dir), async () => liveCandidates(await listPools(decoderFilter(readLiveFile(dir).params)), now), process.env, now)
     .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "Error del bot live";
+      const message = error instanceof Error ? error.message : "Live bot error";
       console.error("meteora live", message);
     })
     .then(() => sendLiveDigest(dir, process.env, now))

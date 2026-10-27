@@ -19,11 +19,11 @@ export function WalletImport({ onImported }: { onImported: () => void }) {
   if (!desktop) {
     return (
       <div className="flex flex-col gap-2 px-3 py-3 text-sm">
-        <p>No hay wallet dedicada. Importa la tuya desde una terminal en la carpeta del proyecto (la clave se escribe oculta):</p>
+        <p>No dedicated wallet. Import yours from a terminal in the project folder (the key is typed hidden):</p>
         <p className="num border border-border bg-black px-3 py-2">
-          <span className="text-muted-foreground">$ </span>npm run wallet -- import TU_DIRECCION
+          <span className="text-muted-foreground">$ </span>npm run wallet -- import YOUR_ADDRESS
         </p>
-        <p className="text-xs text-muted-foreground">O usa la app de escritorio, que tiene este formulario. Nunca pegues la clave en una página web.</p>
+        <p className="text-xs text-muted-foreground">Or use the desktop app, which has this form. Never paste the key into a web page.</p>
       </div>
     );
   }
@@ -43,16 +43,16 @@ export function WalletImport({ onImported }: { onImported: () => void }) {
               setAddress("");
               onImported();
             } else {
-              setError(result.error ?? "No se pudo importar.");
+              setError(result.error ?? "Could not import.");
             }
           })
-          .catch(() => setError("No se pudo importar."))
+          .catch(() => setError("Could not import."))
           .finally(() => setBusy(false));
       }}
     >
-      <p className="text-sm">Importa la wallet que ya usas para el bot. Úsala solo para esto: el bot firma con ella sin preguntarte cada vez.</p>
+      <p className="text-sm">Import the wallet you use for the bot. Use it only for this: the bot signs with it without asking you each time.</p>
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Clave privada (Phantom → Exportar clave privada, o el arreglo de solana-keygen)</span>
+        <span className="text-xs text-muted-foreground">Private key (Phantom → Export private key, or the solana-keygen array)</span>
         <Input
           className="num h-10 bg-black"
           type="password"
@@ -64,14 +64,14 @@ export function WalletImport({ onImported }: { onImported: () => void }) {
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Dirección pública (opcional, para comprobar que es la wallet correcta)</span>
+        <span className="text-xs text-muted-foreground">Public address (optional, to verify it is the right wallet)</span>
         <Input className="num h-10 bg-black" autoComplete="off" spellCheck={false} value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)} />
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" className="min-h-10 px-5 font-bold tracking-widest" disabled={busy || !secret.trim()}>
-          $ importar
+          $ import
         </Button>
-        <p className="text-xs text-muted-foreground">Se guarda solo en esta computadora, en ~/.solana-paper-bot/wallet.json.</p>
+        <p className="text-xs text-muted-foreground">Stored only on this computer, in ~/.solana-paper-bot/wallet.json.</p>
       </div>
       {error ? <p className="glow-red text-sm text-destructive">[ERR] {error}</p> : null}
     </form>

@@ -13,21 +13,21 @@ describe("telegram alerts", () => {
 
   it("describes a live open and a live close without putting the bot token in the text", () => {
     const open = formatLiveNotice({ kind: "open", name: "WEFT <SOL>", stakeSol: 0.0141, signature: "sig123" });
-    expect(open).toContain("Abierta");
+    expect(open).toContain("Opened");
     expect(open).toContain("WEFT &lt;SOL&gt;");
     expect(open).toContain("0.0141 SOL");
     expect(open).toContain("https://solscan.io/tx/sig123");
     const closed = formatLiveNotice({ kind: "close", name: "pill-SOL", stakeSol: 0.02, signature: null, reason: "manual" });
-    expect(closed).toContain("Cerrada");
+    expect(closed).toContain("Closed");
     expect(closed).toContain("manual");
     expect(closed).not.toContain("solscan");
     const sold = formatLiveSell({ name: "pill <SOL>", outSol: 0.012, signature: "sigsell", note: null });
-    expect(sold).toContain("Vendido");
+    expect(sold).toContain("Sold");
     expect(sold).toContain("pill &lt;SOL&gt;");
     expect(sold).toContain("0.0120 SOL");
     expect(sold).toContain("https://solscan.io/tx/sigsell");
-    const kept = formatLiveSell({ name: "pill-SOL", outSol: null, signature: null, note: "La venta pasaría el tope de impacto." });
-    expect(kept).toContain("impacto");
+    const kept = formatLiveSell({ name: "pill-SOL", outSol: null, signature: null, note: "The sale would exceed the impact cap." });
+    expect(kept).toContain("impact cap");
     expect(kept).not.toContain("solscan");
   });
 
@@ -36,10 +36,10 @@ describe("telegram alerts", () => {
     expect(liveDigestDue(null, 1_000)).toBe(true);
     expect(liveDigestDue(1_000, 1_000 + LIVE_DIGEST_MS - 1)).toBe(false);
     expect(liveDigestDue(1_000, 1_000 + LIVE_DIGEST_MS)).toBe(true);
-    const empty = formatLiveDigest({ now: 1_000, positions: [], notice: "Ningún pool cabe. No se envió nada." });
-    expect(empty).toContain("0 abiertas");
-    expect(empty).toContain("Ningún pool cabe");
-    expect(empty).not.toContain("papel");
+    const empty = formatLiveDigest({ now: 1_000, positions: [], notice: "No pool fits. Nothing sent." });
+    expect(empty).toContain("0 open");
+    expect(empty).toContain("No pool fits");
+    expect(empty).not.toContain("paper");
     const now = 3_600_000;
     const text = formatLiveDigest({
       now,
@@ -49,25 +49,25 @@ describe("telegram alerts", () => {
         { name: "pill-SOL", stakeSol: 0.02, openedAt: now - 120_000, closing: true, closeReason: "manual", positionPct: null, tokenPct: null },
       ],
     });
-    expect(text).toContain("1 abierta");
+    expect(text).toContain("1 open");
     expect(text).toContain("0.0141 SOL");
     expect(text).toContain("WEFT &lt;SOL&gt;");
     expect(text).toContain("profit +1.20%");
-    expect(text).toContain("precio -3.00%");
+    expect(text).toContain("price -3.00%");
     expect(text).not.toContain("loss");
     const loss = formatLiveDigest({
       now,
       notice: null,
       positions: [
         { name: "MASK-SOL", stakeSol: 0.0296, openedAt: now - 60_000, closing: false, closeReason: null, positionPct: -0.021, tokenPct: -0.04 },
-        { name: "plano-SOL", stakeSol: 0.01, openedAt: now - 60_000, closing: false, closeReason: null, positionPct: 0.00001, tokenPct: 0 },
+        { name: "flat-SOL", stakeSol: 0.01, openedAt: now - 60_000, closing: false, closeReason: null, positionPct: 0.00001, tokenPct: 0 },
       ],
     });
     expect(loss).toContain("loss -2.10%");
-    expect(loss).toContain("plano 0.00%");
+    expect(loss).toContain("flat 0.00%");
     expect(text).toContain("1 h");
-    expect(text).toContain("cerrando (manual)");
-    expect(text).toContain("1 cerrando");
+    expect(text).toContain("closing (manual)");
+    expect(text).toContain("1 closing");
   });
 
   it("parses owner commands and refuses to turn the bot on", () => {
@@ -75,9 +75,11 @@ describe("telegram alerts", () => {
     expect(parseLiveCommand("/estado@TradingMcPolloBot")).toEqual({ kind: "status" });
     expect(parseLiveCommand("cerrar todo")).toEqual({ kind: "stop" });
     expect(parseLiveCommand("cerrar pill")).toEqual({ kind: "close", query: "pill" });
-    expect(parseLiveCommand("hola")).toBeNull();
+    expect(parseLiveCommand("hello")).toBeNull();
     expect(parseLiveCommand("abrir")).toEqual({ kind: "refused" });
     expect(parseLiveCommand("/start")).toEqual({ kind: "help" });
+    expect(parseLiveCommand("balance")).toEqual({ kind: "balance" });
+    expect(parseLiveCommand("close pill")).toEqual({ kind: "close", query: "pill" });
   });
 
   it("picks one live position to close and asks when several match", () => {
@@ -85,13 +87,13 @@ describe("telegram alerts", () => {
       { address: "a", name: "pill-SOL", closing: false },
       { address: "b", name: "WEFT <SOL>", closing: false },
     ];
-    expect(pickCloseTarget(rows, null)).toEqual({ reply: expect.stringContaining("Hay 2") });
+    expect(pickCloseTarget(rows, null)).toEqual({ reply: expect.stringContaining("2 open") });
     expect(pickCloseTarget(rows, "pill")).toEqual({ address: "a", name: "pill-SOL" });
     expect(pickCloseTarget([{ address: "b", name: "WEFT <SOL>", closing: false }], "weft")).toEqual({ address: "b", name: "WEFT <SOL>" });
     const none = pickCloseTarget([], null);
-    expect("reply" in none ? none.reply : "").toContain("No hay posiciones");
+    expect("reply" in none ? none.reply : "").toContain("No open positions");
     expect(formatBalance({ balanceSol: 0.3777, balanceUsd: 40.03, running: true, openCount: 0 })).toContain("0.3777 SOL");
-    expect(formatBalance({ balanceSol: 0.3777, balanceUsd: 40.03, running: true, openCount: 0 })).toContain("40.03 US$");
+    expect(formatBalance({ balanceSol: 0.3777, balanceUsd: 40.03, running: true, openCount: 0 })).toContain("40.03 USD");
   });
 
   it("reads updates without putting the bot token in an error", async () => {
@@ -112,14 +114,14 @@ describe("telegram alerts", () => {
 
   it("posts HTML to the Bot API and never leaks the token in errors", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
-    await sendTelegram({ token: "SECRET", chatId: "42" }, "hola");
+    await sendTelegram({ token: "SECRET", chatId: "42" }, "hello");
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("https://api.telegram.org/botSECRET/sendMessage");
-    expect(JSON.parse(String(init?.body))).toMatchObject({ chat_id: "42", text: "hola", parse_mode: "HTML" });
+    expect(JSON.parse(String(init?.body))).toMatchObject({ chat_id: "42", text: "hello", parse_mode: "HTML" });
 
     fetchMock.mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }));
-    await expect(sendTelegram({ token: "SECRET", chatId: "42" }, "hola")).rejects.toThrow(/401/);
+    await expect(sendTelegram({ token: "SECRET", chatId: "42" }, "hello")).rejects.toThrow(/401/);
     fetchMock.mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }));
-    await expect(sendTelegram({ token: "SECRET", chatId: "42" }, "hola")).rejects.not.toThrow(/SECRET/);
+    await expect(sendTelegram({ token: "SECRET", chatId: "42" }, "hello")).rejects.not.toThrow(/SECRET/);
   });
 });

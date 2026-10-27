@@ -54,7 +54,7 @@ type BinanceKline = [number, string, string, string, string, string, number, ...
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000), cache: "no-store" });
-  if (!response.ok) throw new Error(`${new URL(url).host} respondió ${response.status}`);
+  if (!response.ok) throw new Error(`${new URL(url).host} returned ${response.status}`);
   return (await response.json()) as T;
 }
 

@@ -6,12 +6,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PolloTraderBot",
-  description: "Bot de liquidez Meteora DLMM en Solana con wallet dedicada.",
+  description: "Meteora DLMM liquidity bot on Solana with a dedicated wallet.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="es" className="dark h-full antialiased">
+    <html lang="en" className="dark h-full antialiased">
       <body className="min-h-full bg-background text-foreground">
         <BinaryRain />
         <div className="relative z-10">{children}</div>

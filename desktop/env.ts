@@ -12,7 +12,7 @@ export function parseEnv(text: string): Record<string, string> {
 
 /** Set KEY=value on its existing line, or append it, leaving comments and other keys as they are. */
 export function setEnvValue(text: string, key: string, value: string): string {
-  if (/[\r\n]/.test(value)) throw new Error("El valor no puede tener saltos de línea.");
+  if (/[\r\n]/.test(value)) throw new Error("The value cannot contain line breaks.");
   const lines = text.split(/\r?\n/);
   const at = lines.findIndex((line) => new RegExp(`^\\s*${key}\\s*=`).test(line));
   if (at >= 0) {
@@ -34,7 +34,7 @@ export function maskRpc(raw: string | undefined): string | null {
   try {
     url = new URL(raw.trim());
   } catch {
-    return "(URL inválida)";
+    return "(invalid URL)";
   }
   const pathPart = url.pathname.split("/").map(maskToken).join("/");
   const query = [...url.searchParams].map(([key, value]) => `${key}=${maskToken(value)}`).join("&");

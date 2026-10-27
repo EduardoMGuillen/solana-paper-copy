@@ -40,6 +40,6 @@ describe("rpc mask", () => {
   it("returns null when there is no RPC and a placeholder for junk", () => {
     expect(maskRpc("")).toBeNull();
     expect(maskRpc(undefined)).toBeNull();
-    expect(maskRpc("not a url")).toBe("(URL inválida)");
+    expect(maskRpc("not a url")).toBe("(invalid URL)");
   });
 });

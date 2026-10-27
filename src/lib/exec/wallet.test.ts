@@ -54,7 +54,7 @@ describe("wallet address", () => {
   });
 
   it("rejects a symbol that is not base58", () => {
-    expect(() => decodeBase58("0OIl")).toThrow(/inválida/);
+    expect(() => decodeBase58("0OIl")).toThrow(/invalid address/);
   });
 });
 
@@ -94,7 +94,7 @@ describe("imported wallet", () => {
   it("refuses a key for another address and writes nothing", () => {
     const dir = tempDir();
     const pair = Keypair.generate();
-    expect(() => importDedicatedWallet(dir, encodeBase58(pair.secretKey), Keypair.generate().publicKey.toBase58())).toThrow(/no corresponde/);
+    expect(() => importDedicatedWallet(dir, encodeBase58(pair.secretKey), Keypair.generate().publicKey.toBase58())).toThrow(/does not match/);
     expect(fs.existsSync(path.join(dir, "wallet.json"))).toBe(false);
   });
 
@@ -108,19 +108,19 @@ describe("imported wallet", () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).toMatch(/no es válida/);
+    expect(message).toMatch(/Invalid private key/);
     expect(message).not.toContain(text.slice(0, 12));
   });
 
   it("rejects text that is not a 64-byte key without echoing it", () => {
     const dir = tempDir();
     for (const bad of ["", "0OIl-not-base58", encodeBase58(new Uint8Array(32).fill(7)), "[1,2,3]", "[" + "300,".repeat(63) + "300]"]) {
-      expect(() => importDedicatedWallet(dir, bad)).toThrow(/clave privada/);
+      expect(() => importDedicatedWallet(dir, bad)).toThrow(/private key/);
     }
     try {
-      importDedicatedWallet(dir, "secretoSecretoSecreto");
+      importDedicatedWallet(dir, "secretSecretSecret");
     } catch (error) {
-      expect((error as Error).message).not.toContain("secretoSecreto");
+      expect((error as Error).message).not.toContain("secretSecret");
     }
   });
 
@@ -129,13 +129,13 @@ describe("imported wallet", () => {
     const pair = Keypair.generate();
     importDedicatedWallet(dir, encodeBase58(pair.secretKey));
     expect(importDedicatedWallet(dir, encodeBase58(pair.secretKey))).toBe(pair.publicKey.toBase58());
-    expect(() => importDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey))).toThrow(/Ya hay una wallet/);
+    expect(() => importDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey))).toThrow(/already a wallet/);
     expect(readWalletAddress(dir)).toBe(pair.publicKey.toBase58());
   });
 
   it("refuses a folder inside the project", () => {
     const pair = Keypair.generate();
-    expect(() => importDedicatedWallet(path.join(process.cwd(), "wallet"), encodeBase58(pair.secretKey))).toThrow(/dentro del proyecto/);
+    expect(() => importDedicatedWallet(path.join(process.cwd(), "wallet"), encodeBase58(pair.secretKey))).toThrow(/inside the project/);
   });
 });
 
@@ -158,23 +158,23 @@ describe("dedicated wallet", () => {
   });
 
   it("refuses to create a key inside the repository", () => {
-    expect(() => assertOutsideRepo(path.join(process.cwd(), "data"))).toThrow(/dentro del proyecto/);
-    expect(() => createDedicatedWallet(path.join(process.cwd(), "data"))).toThrow(/dentro del proyecto/);
+    expect(() => assertOutsideRepo(path.join(process.cwd(), "data"))).toThrow(/inside the project/);
+    expect(() => createDedicatedWallet(path.join(process.cwd(), "data"))).toThrow(/inside the project/);
   });
 
   it("reads the address even if the secret file is unreadable garbage", () => {
     const dir = tempDir();
     const address = createDedicatedWallet(dir);
-    fs.writeFileSync(path.join(dir, "wallet.json"), "no abrir", "utf8");
+    fs.writeFileSync(path.join(dir, "wallet.json"), "do not open", "utf8");
     expect(readWalletAddress(dir)).toBe(address);
   });
 });
 
 describe("live window status", () => {
   it("signs only while this window is running", () => {
-    expect(signingBlocked(false)).toMatch(/no firma/);
-    expect(signingBlocked(false, true)).toMatch(/firma aperturas/);
-    expect(signingBlocked(true)).toMatch(/Corte de emergencia/);
+    expect(signingBlocked(false)).toMatch(/not signing/);
+    expect(signingBlocked(false, true)).toMatch(/signs Meteora opens/);
+    expect(signingBlocked(true)).toMatch(/Emergency stop/);
     for (const mode of ["paper", "shadow", "live"]) {
       expect(signingBlocked(false)).not.toContain(mode);
     }
@@ -201,11 +201,11 @@ describe("live window status", () => {
     const dir = tempDir();
     const address = createDedicatedWallet(dir);
     const status = await walletStatus({ WALLET_DIR: dir }, async () => {
-      throw new Error("red caída");
+      throw new Error("network down");
     });
     expect(status.address).toBe(address);
     expect(status.balanceSol).toBeNull();
-    expect(status.error).toBe("red caída");
+    expect(status.error).toBe("network down");
     expect(status.signing).toBe(false);
   });
 
@@ -216,7 +216,7 @@ describe("live window status", () => {
     const status = await walletStatus({ WALLET_DIR: dir }, async () => ({ ok: true, json: async () => ({ result: { value: 0 } }) }));
     expect(status.kill).toBe(true);
     expect(status.signing).toBe(false);
-    expect(status.reason).toMatch(/Corte/);
+    expect(status.reason).toMatch(/Emergency/);
   });
 
   it("starts and stops without signing, and a KILL file keeps it stopped", async () => {
@@ -230,7 +230,7 @@ describe("live window status", () => {
     expect(started.signing).toBe(true);
     expect(setLiveBot(dir, false).running).toBe(false);
     fs.writeFileSync(path.join(dir, "KILL"), "", "utf8");
-    expect(setLiveBot(dir, true)).toEqual({ running: false, error: "Corte de emergencia activo. El bot sigue apagado." });
+    expect(setLiveBot(dir, true)).toEqual({ running: false, error: "Emergency stop active. The bot stays stopped." });
     const blocked = await walletStatus({ WALLET_DIR: dir }, async () => ({ ok: true, json: async () => ({ result: { value: 0 } }) }));
     expect(blocked.running).toBe(false);
     expect(blocked.signing).toBe(false);
@@ -258,7 +258,7 @@ describe("live window status", () => {
     expect(saved.params.takeProfit).toBe(1);
     expect(setLiveBot(dir, true).running).toBe(true);
     const blocked = saveLiveParams(dir, { slot: 0.5 });
-    expect(blocked.error).toMatch(/Para el bot/);
+    expect(blocked.error).toMatch(/Stop the bot/);
     expect(blocked.params.slot).toBe(0.25);
     const status = await walletStatus({ WALLET_DIR: dir }, async () => ({ ok: true, json: async () => ({ result: { value: 0 } }) }));
     expect(status.running).toBe(true);
@@ -284,7 +284,7 @@ describe("live window status", () => {
       "utf8",
     );
     expect(closeLivePosition(dir, pool).error).toBeNull();
-    expect(JSON.parse(fs.readFileSync(path.join(dir, "bot.json"), "utf8")).notice).toMatch(/se puede volver a abrir/);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "bot.json"), "utf8")).notice).toMatch(/can be reopened/);
     const afterOne = await walletStatus({ WALLET_DIR: dir }, async () => ({ ok: true, json: async () => ({ result: { value: 0 } }) }));
     expect(afterOne.running).toBe(true);
     expect(afterOne.positions.find((position) => position.address === pool)?.closeReason).toBe("manual");
@@ -326,7 +326,7 @@ describe("live window status", () => {
     expect(parseLamports({ result: { value: 1_500_000_000 } })).toBe(1_500_000_000);
     expect(() => parseLamports({ error: { message: "no" } })).toThrow(/no/);
     expect(parseAccountLamports({ result: { value: [{ lamports: 41_899_840 }, null] } }, 2)).toEqual([41_899_840, 0]);
-    expect(() => parseAccountLamports({ result: { value: [{ lamports: 1 }] } }, 2)).toThrow(/cuentas/);
+    expect(() => parseAccountLamports({ result: { value: [{ lamports: 1 }] } }, 2)).toThrow(/accounts/);
   });
 
   it("adds marked liquidity and position rent into the total", () => {
@@ -414,7 +414,7 @@ describe("replace wallet", () => {
 
   it("asks for the last 4 characters of the current address", () => {
     const { dir, old } = withWallet();
-    expect(() => replaceDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey), "", "xxxx")).toThrow(/últimos 4/);
+    expect(() => replaceDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey), "", "xxxx")).toThrow(/last 4/);
     expect(readWalletAddress(dir)).toBe(old);
   });
 
@@ -425,15 +425,15 @@ describe("replace wallet", () => {
     expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/STOP/);
     setLiveBot(dir, false);
     writeLiveFile(dir, { ...readLiveFile(dir), positions: [{ address: WSOL, name: "X-SOL", stakeSol: 0.1, openedAt: 1, signature: "s", closing: false, closeReason: null, tokenPct: null, positionPct: null, note: "" } as never] });
-    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/posiciones/);
+    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/open positions/);
     writeLiveFile(dir, { ...readLiveFile(dir), positions: [], leftovers: [{ pool: WSOL, name: "X-SOL", tokenMint: WSOL, solIsY: true, since: 1, triedAt: 1 }] });
-    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/tokens/);
+    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/leftover tokens/);
     expect(readWalletAddress(dir)).toBe(old);
   });
 
   it("checks the new key before touching the old one", () => {
     const { dir, old } = withWallet();
-    expect(() => replaceDedicatedWallet(dir, "basura", "", old.slice(-4))).toThrow(/clave privada/);
+    expect(() => replaceDedicatedWallet(dir, "garbage", "", old.slice(-4))).toThrow(/private key/);
     expect(readWalletAddress(dir)).toBe(old);
   });
 

@@ -11,7 +11,7 @@ const num = (value: unknown): number => {
 
 async function getJson(url: string): Promise<unknown> {
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000), cache: "no-store" });
-  if (!response.ok) throw new Error(`Meteora respondió ${response.status}`);
+  if (!response.ok) throw new Error(`Meteora returned ${response.status}`);
   return response.json();
 }
 

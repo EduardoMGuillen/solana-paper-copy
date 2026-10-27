@@ -250,7 +250,7 @@ describe("live open plan", () => {
   it("keeps a position open without a read and fires only the time exit", () => {
     const unread = markOne(undefined);
     expect(unread?.closing).toBe(false);
-    expect(unread?.note).toMatch(/No se pudo leer/);
+    expect(unread?.note).toMatch(/Could not read/);
     const late = markOne(undefined, 1_000 + PAPER_LIVE_PARAMS.holdHours * 3_600_000);
     expect(late?.closeReason).toBe("time");
   });

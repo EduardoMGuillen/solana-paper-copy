@@ -41,10 +41,10 @@ function writeOffset(dir: string, offset: number): void {
 
 async function replyFor(dir: string, command: LiveCommand, env: Record<string, string | undefined>, now: number, kick: () => void): Promise<string> {
   if (command.kind === "help") return LIVE_COMMAND_HELP;
-  if (command.kind === "refused") return "<b>Meteora live</b> · Desde Telegram no se enciende. Start queda en la página.";
+  if (command.kind === "refused") return "<b>Meteora live</b> · The bot cannot be started from Telegram. Start is on the web page.";
   if (command.kind === "status") {
     const file = readLiveFile(dir);
-    return formatLiveDigest({ now, positions: file.positions, notice: file.running ? file.notice : "Apagado. No abre posiciones." });
+    return formatLiveDigest({ now, positions: file.positions, notice: file.running ? file.notice : "Stopped. Not opening positions." });
   }
   if (command.kind === "balance") {
     const [status, solUsd] = await Promise.all([walletStatus(env), fetchSolUsd()]);
@@ -61,15 +61,15 @@ async function replyFor(dir: string, command: LiveCommand, env: Record<string, s
     kick();
     const left = readLiveFile(dir).positions.length;
     return left === 0
-      ? "<b>Meteora live</b> · Stop. No había posiciones. Ya no abre."
-      : `<b>Meteora live</b> · Stop. Cerrando ${left}.`;
+      ? "<b>Meteora live</b> · Stop. No positions were open. No longer opening."
+      : `<b>Meteora live</b> · Stop. Closing ${left}.`;
   }
   const picked = pickCloseTarget(readLiveFile(dir).positions, command.query);
   if ("reply" in picked) return picked.reply;
   const closed = await withWallet(() => closeLivePosition(dir, picked.address));
   if (closed.error) return `<b>Meteora live</b> · ${closed.error}`;
   kick();
-  return `<b>Meteora live</b> · Cerrando <b>${picked.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</b>.`;
+  return `<b>Meteora live</b> · Closing <b>${picked.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</b>.`;
 }
 
 /** One short poll. A failure here never reaches the paper loop. */
@@ -85,7 +85,7 @@ export async function pollTelegramCommands(
   try {
     updates = await readTelegramUpdates(config, readOffset(dir));
   } catch (error) {
-    console.error("telegram comandos", error instanceof Error ? error.message : "sin respuesta");
+    console.error("telegram commands", error instanceof Error ? error.message : "no response");
     return;
   }
   if (updates.length === 0) return;
@@ -99,7 +99,7 @@ export async function pollTelegramCommands(
       await sendTelegram(config, text);
     } catch (error) {
       failed = true;
-      console.error("telegram comandos", error instanceof Error ? error.message : "falló");
+      console.error("telegram commands", error instanceof Error ? error.message : "failed");
     }
   }
   if (!failed) writeOffset(dir, Math.max(...updates.map((update) => update.updateId)) + 1);
@@ -111,7 +111,7 @@ export function kickTelegramCommands(): void {
   if (pending) return;
   pending = pollTelegramCommands()
     .catch((error: unknown) => {
-      console.error("telegram comandos", error instanceof Error ? error.message : "falló");
+      console.error("telegram commands", error instanceof Error ? error.message : "failed");
     })
     .finally(() => {
       pending = null;

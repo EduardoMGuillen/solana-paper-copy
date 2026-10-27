@@ -14,6 +14,6 @@ describe("sell leftover token", () => {
     expect(decideSell({ rawAmount: BigInt(1_000), outLamports: BigInt(100), priceImpactPercent: 0.1, maxImpactBps: 150 }).sell).toBe(false);
     const blocked = decideSell({ rawAmount: BigInt(1_000), outLamports: BigInt(5_000_000), priceImpactPercent: 3, maxImpactBps: 150 });
     expect(blocked.sell).toBe(false);
-    if (!blocked.sell) expect(blocked.reason).toMatch(/impacto/);
+    if (!blocked.sell) expect(blocked.reason).toMatch(/impact cap/);
   });
 });

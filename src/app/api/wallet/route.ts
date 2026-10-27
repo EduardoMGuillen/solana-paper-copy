@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { running?: unknown; params?: unknown; close?: unknown } | null;
   const closing = typeof body?.close === "string" ? body.close : null;
   if (!body || (typeof body.running !== "boolean" && body.params === undefined && !closing)) {
-    return Response.json({ ok: false, error: "Indica start, stop o parámetros." }, { status: 400 });
+    return Response.json({ ok: false, error: "Specify start, stop or params." }, { status: 400 });
   }
   const acted = typeof body.running === "boolean" || Boolean(closing);
   try {
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     if (acted) kickLiveLp();
     return result;
   } catch (cause) {
-    const error = cause instanceof Error ? cause.message : "No se pudo cambiar el bot.";
+    const error = cause instanceof Error ? cause.message : "Could not update the bot.";
     return Response.json({ ok: false, error }, { status: 400 });
   }
 }
@@ -55,7 +55,7 @@ async function handle(body: { running?: unknown; params?: unknown; close?: unkno
     }
     return Response.json({ ok: true, error: null, status: await liveStatus() });
   } catch (cause) {
-    const error = cause instanceof Error ? cause.message : "No se pudo cambiar el bot.";
+    const error = cause instanceof Error ? cause.message : "Could not update the bot.";
     return Response.json({ ok: false, error }, { status: 400 });
   }
 }

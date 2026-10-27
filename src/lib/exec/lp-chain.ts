@@ -116,11 +116,11 @@ type DlmmPool = {
 function loadKeypair(dir: string): Keypair {
   const raw = JSON.parse(fs.readFileSync(path.join(dir, "wallet.json"), "utf8")) as unknown;
   if (!Array.isArray(raw) || raw.length !== 64 || raw.some((part) => typeof part !== "number" || part < 0 || part > 255)) {
-    throw new Error("La wallet dedicada no se puede leer.");
+    throw new Error("Cannot read the dedicated wallet.");
   }
   const pair = Keypair.fromSecretKey(Uint8Array.from(raw));
   const expected = readWalletAddress(dir);
-  if (!expected || pair.publicKey.toBase58() !== expected) throw new Error("La clave no corresponde a la dirección publicada.");
+  if (!expected || pair.publicKey.toBase58() !== expected) throw new Error("The key does not match the published address.");
   return pair;
 }
 
@@ -142,7 +142,7 @@ function loadDlmm(): DlmmSdk {
   const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
   const file = path.join(process.cwd(), "src", "lib", "exec", "load-dlmm.cjs");
   const sdk = nodeRequire(file) as DlmmSdk;
-  if (typeof sdk?.create !== "function") throw new Error("No se pudo cargar Meteora.");
+  if (typeof sdk?.create !== "function") throw new Error("Could not load Meteora.");
   dlmmSdk = sdk;
   return sdk;
 }
@@ -177,15 +177,15 @@ async function commit(rpc: Connection, tx: Transaction, signers: Keypair[], micr
   tx.recentBlockhash = latest.blockhash;
   tx.sign(...signers);
   const sim = await rpc.simulateTransaction(tx);
-  if (sim.value.err) throw new Error(`La simulación rechazó la transacción. ${simText(sim.value.err, sim.value.logs)}`);
+  if (sim.value.err) throw new Error(`Simulation rejected the transaction. ${simText(sim.value.err, sim.value.logs)}`);
   const raw = tx.signature;
-  if (!raw) throw new Error("La transacción quedó sin firma.");
+  if (!raw) throw new Error("The transaction was left unsigned.");
   const signature = encodeBase58(raw);
   onSigned(signature);
   await rpc.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
   try {
     const confirmed = await rpc.confirmTransaction({ signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight }, "confirmed");
-    if (confirmed.value.err) throw new Error("La transacción se confirmó con error.");
+    if (confirmed.value.err) throw new Error("The transaction confirmed with an error.");
   } catch (error) {
     // The RPC can fail the wait while the transaction lands. Ask once before calling it lost.
     if (await landedOn(rpc, signature).catch(() => false)) return signature;
@@ -238,7 +238,7 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       return found;
     },
     async inspect(position) {
-      if (!position.position) throw new Error("Esta posición no tiene cuenta en la cadena.");
+      if (!position.position) throw new Error("This position has no on-chain account.");
       const pubkey = new PublicKey(position.position);
       if (!(await rpc.getAccountInfo(pubkey))) return { exists: false, valueLamports: 0, price: 0 };
       const pool = await poolOf(rpc, position.address);
@@ -269,14 +269,14 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const y = pool.tokenY.publicKey.toBase58();
       const solIsY = y === WSOL;
       const solIsX = x === WSOL;
-      if (solIsY !== order.solIsY || (!solIsY && !solIsX)) throw new Error("El lado del SOL en el pool no coincide.");
+      if (solIsY !== order.solIsY || (!solIsY && !solIsX)) throw new Error("The SOL side of the pool does not match.");
       const token = solIsY ? pool.tokenX : pool.tokenY;
-      if (token.publicKey.toBase58() !== order.tokenMint) throw new Error("El token del pool no coincide.");
-      if (!clearAuthority(token.mint)) throw new Error("El token todavía puede mintear o congelar. No se abre.");
+      if (token.publicKey.toBase58() !== order.tokenMint) throw new Error("The pool token does not match.");
+      if (!clearAuthority(token.mint)) throw new Error("The token can still mint or freeze. Not opening.");
       const active = await pool.getActiveBin();
       const entryPrice = solPerToken(Number(active.pricePerToken), solIsY);
       if (!(entryPrice > 0) || Math.abs(entryPrice / order.price - 1) > MAX_OPEN_PRICE_DRIFT) {
-        throw new Error("El precio en la cadena no coincide con el de Meteora. No se abre.");
+        throw new Error("On-chain price does not match Meteora's. Not opening.");
       }
       const swapForY = solIsY;
       const binsForQuote = await pool.getBinArrayForSwap(swapForY);
@@ -285,17 +285,17 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const quote = pool.swapQuote(new BN(raw.toString()), swapForY, new BN(slippageBps), binsForQuote);
       const impact = Number(quote.priceImpact.toString());
       if (!(quote.outAmount.gtn(0)) || impactTooHigh(impact, maxImpactBps)) {
-        throw new Error("No hay una salida a SOL con un impacto aceptable.");
+        throw new Error("No exit to SOL with acceptable impact.");
       }
       const minBinId = solIsY ? active.binId - order.bins : active.binId + 1;
       const maxBinId = solIsY ? active.binId - 1 : active.binId + order.bins;
-      if (maxBinId - minBinId + 1 > order.bins) throw new Error("El rango armado no cabe en una posición.");
+      if (maxBinId - minBinId + 1 > order.bins) throw new Error("The built range does not fit in one position.");
       // Bin arrays that the range touches and nobody created yet cost rent that never comes back.
       const keys = sdk.getBinArrayKeysCoverage(new BN(minBinId), new BN(maxBinId), pool.pubkey, pool.program.programId);
       const missing = (await rpc.getMultipleAccountsInfo(keys)).filter((info) => info == null).length;
       const rent = missing * BIN_ARRAY_RENT_LAMPORTS;
       if (rent > maxBinArrayRent) {
-        throw new Error(`Este rango necesita crear ${missing} bin array(s): ${(rent / 1_000_000_000).toFixed(4)} SOL de renta que no se recupera. No se abre.`);
+        throw new Error(`This range needs ${missing} new bin array(s): ${(rent / 1_000_000_000).toFixed(4)} SOL of non-refundable rent. Not opening.`);
       }
       const position = Keypair.generate();
       const lamports = new BN(order.lamports);
@@ -322,23 +322,23 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const rentLamports = await rpc.getMinimumBalanceForRentExemption(positionBytes(width));
       const balance = await rpc.getBalance(wallet.publicKey, "confirmed");
       if (balance < order.lamports + rentLamports + OPEN_FEE_LAMPORTS) {
-        throw new Error(`Falta SOL para el alquiler de ${(rentLamports / 1_000_000_000).toFixed(4)} SOL de una posición de ${width} bins. No se abre.`);
+        throw new Error(`Not enough SOL for the ${(rentLamports / 1_000_000_000).toFixed(4)} SOL rent of a ${width}-bin position. Not opening.`);
       }
       const create = await pool.createExtendedEmptyPosition(minBinId, maxBinId, position.publicKey, wallet.publicKey);
       sent.signature = await commit(rpc, create, [wallet, position], microLamports, journal);
       try {
         const chunks = await pool.addLiquidityByStrategyChunkable(deposit);
-        if (chunks.length === 0) throw new Error("El depósito no armó ninguna transacción.");
+        if (chunks.length === 0) throw new Error("The deposit built no transactions.");
         for (const tx of chunks) sent.signature = await commit(rpc, tx, [wallet], microLamports, journal);
       } catch (error) {
-        const why = error instanceof Error ? error.message : "El depósito falló.";
-        throw new IncompleteOpen(`La posición se creó pero la liquidez no entró completa. ${why}`.slice(0, 280), { ...sent });
+        const why = error instanceof Error ? error.message : "The deposit failed.";
+        throw new IncompleteOpen(`Position created but liquidity was only partly deposited. ${why}`.slice(0, 280), { ...sent });
       }
       return sent;
     },
     async close(position, onSigned) {
       if (!position.position || position.minBinId == null || position.maxBinId == null) {
-        throw new Error("Esta posición no tiene cuenta para cerrarla.");
+        throw new Error("This position has no account to close.");
       }
       const wallet = loadKeypair(dir);
       const pubkey = new PublicKey(position.position);
@@ -358,7 +358,7 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
             bps: new BN(10_000),
             shouldClaimAndClose: true,
           });
-      if (txs.length === 0) throw new Error("El cierre no armó ninguna transacción.");
+      if (txs.length === 0) throw new Error("The close built no transactions.");
       let signature = "";
       for (const tx of txs) signature = await commit(rpc, tx, [wallet], microLamports, onSigned);
       return signature;
@@ -369,10 +369,10 @@ export function liveChain(dir: string, env: Record<string, string | undefined> =
       const pool = await poolOf(rpc, target.address);
       const solIsY = pool.tokenY.publicKey.toBase58() === WSOL;
       const solIsX = pool.tokenX.publicKey.toBase58() === WSOL;
-      if (solIsY !== target.solIsY || (!solIsY && !solIsX)) return { sold: false, reason: "El lado del SOL no coincide. El token se quedó en la wallet." };
+      if (solIsY !== target.solIsY || (!solIsY && !solIsX)) return { sold: false, reason: "The SOL side does not match. The token stayed in the wallet." };
       const token = solIsY ? pool.tokenX : pool.tokenY;
       const sol = solIsY ? pool.tokenY : pool.tokenX;
-      if (token.publicKey.toBase58() !== target.tokenMint) return { sold: false, reason: "El token del pool no coincide. Se quedó en la wallet." };
+      if (token.publicKey.toBase58() !== target.tokenMint) return { sold: false, reason: "The pool token does not match. It stayed in the wallet." };
       const raw = await tokenRaw(rpc, wallet.publicKey, token.publicKey);
       if (raw <= BigInt(0)) return { sold: false, reason: "none" };
       const swapForY = solIsY;

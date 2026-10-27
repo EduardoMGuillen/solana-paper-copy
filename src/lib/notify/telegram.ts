@@ -28,10 +28,10 @@ export function formatLiveNotice(event: {
   reason?: string | null;
 }): string {
   const icon = event.kind === "open" ? "🟢" : "🔴";
-  const verb = event.kind === "open" ? "Abierta" : "Cerrada";
+  const verb = event.kind === "open" ? "Opened" : "Closed";
   const why = event.kind === "close" && event.reason ? ` · ${escapeHtml(event.reason)}` : "";
   const link = event.signature && event.signature !== "already-closed"
-    ? `\n<a href="https://solscan.io/tx/${encodeURIComponent(event.signature)}">Ver en Solscan</a>`
+    ? `\n<a href="https://solscan.io/tx/${encodeURIComponent(event.signature)}">View on Solscan</a>`
     : "";
   return `${icon} <b>Meteora live</b> · ${verb} <b>${escapeHtml(event.name)}</b> · ${event.stakeSol.toFixed(4)} SOL${why}${link}`;
 }
@@ -39,9 +39,9 @@ export function formatLiveNotice(event: {
 /** Result of selling the token left by a live close. `outSol` null means the token stayed. */
 export function formatLiveSell(event: { name: string; outSol: number | null; signature: string | null; note: string | null }): string {
   if (event.outSol != null && event.signature) {
-    return `🟡 <b>Meteora live</b> · Vendido <b>${escapeHtml(event.name)}</b> · ${event.outSol.toFixed(4)} SOL\n<a href="https://solscan.io/tx/${encodeURIComponent(event.signature)}">Ver en Solscan</a>`;
+    return `🟡 <b>Meteora live</b> · Sold <b>${escapeHtml(event.name)}</b> · ${event.outSol.toFixed(4)} SOL\n<a href="https://solscan.io/tx/${encodeURIComponent(event.signature)}">View on Solscan</a>`;
   }
-  return `⚠️ <b>Meteora live</b> · Cerrada <b>${escapeHtml(event.name)}</b> · ${escapeHtml(event.note ?? "El token se quedó en la wallet.")}`;
+  return `⚠️ <b>Meteora live</b> · Closed <b>${escapeHtml(event.name)}</b> · ${escapeHtml(event.note ?? "The token stayed in the wallet.")}`;
 }
 
 /** How often the open-position snapshot is pushed. Open and close stay immediate. */
@@ -70,7 +70,7 @@ function signedPct(fraction: number): string {
 /** Position return, named so a flat mark is not called a profit. */
 function positionResult(fraction: number): string {
   const value = fraction * 100;
-  if (Math.abs(value) < 0.005) return "plano 0.00%";
+  if (Math.abs(value) < 0.005) return "flat 0.00%";
   return `${value > 0 ? "profit" : "loss"} ${signedPct(fraction)}`;
 }
 
@@ -87,16 +87,16 @@ export function formatLiveDigest(input: { now: number; positions: LiveDigestRow[
   const open = input.positions.filter((position) => !position.closing);
   const closing = input.positions.length - open.length;
   const stake = open.reduce((sum, position) => sum + position.stakeSol, 0);
-  const count = `${open.length} abierta${open.length === 1 ? "" : "s"}`;
-  const header = `📊 <b>Meteora live</b> · ${count}${open.length > 0 ? ` · ${stake.toFixed(4)} SOL` : ""}${closing > 0 ? ` · ${closing} cerrando` : ""}`;
+  const count = `${open.length} open`;
+  const header = `📊 <b>Meteora live</b> · ${count}${open.length > 0 ? ` · ${stake.toFixed(4)} SOL` : ""}${closing > 0 ? ` · ${closing} closing` : ""}`;
   if (input.positions.length === 0) {
     const why = input.notice ? `\n${escapeHtml(input.notice)}` : "";
     return `${header}${why}`;
   }
   const lines = input.positions.map((position) => {
     const pnl = position.positionPct == null ? "" : ` · ${positionResult(position.positionPct)}`;
-    const price = position.tokenPct == null ? "" : ` · precio ${signedPct(position.tokenPct)}`;
-    const closing = position.closing ? ` · cerrando${position.closeReason ? ` (${escapeHtml(position.closeReason)})` : ""}` : "";
+    const price = position.tokenPct == null ? "" : ` · price ${signedPct(position.tokenPct)}`;
+    const closing = position.closing ? ` · closing${position.closeReason ? ` (${escapeHtml(position.closeReason)})` : ""}` : "";
     return `• <b>${escapeHtml(position.name)}</b> · ${position.stakeSol.toFixed(4)} SOL${pnl}${price}${closing} · ${ageLabel(input.now - position.openedAt)}`;
   });
   return [header, ...lines].join("\n").slice(0, MAX_LEN);
@@ -112,11 +112,11 @@ export type LiveCommand =
 
 export const LIVE_COMMAND_HELP = [
   "<b>Meteora live</b>",
-  "saldo — SOL y dólares",
-  "estado — posiciones abiertas",
-  "cerrar — cierra la única abierta",
-  "cerrar nombre — cierra esa",
-  "stop — cierra todas y deja de abrir",
+  "balance — SOL and USD",
+  "status — open positions",
+  "close — closes the only open one",
+  "close name — closes that one",
+  "stop — closes all and stops opening",
 ].join("\n");
 
 /** Commands the owner can send. Anything else is ignored. Start is not one of them. */
@@ -135,11 +135,11 @@ export function parseLiveCommand(raw: string): LiveCommand | null {
 }
 
 export function formatBalance(input: { balanceSol: number | null; balanceUsd: number | null; running: boolean; openCount: number }): string {
-  const sol = input.balanceSol != null ? `${input.balanceSol.toFixed(4)} SOL` : "saldo no disponible";
-  const usd = input.balanceUsd != null ? ` · ${input.balanceUsd.toFixed(2)} US$` : "";
-  const state = input.running ? "Encendido" : "Apagado";
+  const sol = input.balanceSol != null ? `${input.balanceSol.toFixed(4)} SOL` : "balance unavailable";
+  const usd = input.balanceUsd != null ? ` · ${input.balanceUsd.toFixed(2)} USD` : "";
+  const state = input.running ? "Running" : "Stopped";
   const n = input.openCount;
-  return `<b>Meteora live</b> · ${sol}${usd}\n${state} · ${n} abierta${n === 1 ? "" : "s"}`;
+  return `<b>Meteora live</b> · ${sol}${usd}\n${state} · ${n} open`;
 }
 
 export function pickCloseTarget(
@@ -147,21 +147,21 @@ export function pickCloseTarget(
   query: string | null,
 ): { address: string; name: string } | { reply: string } {
   const open = positions.filter((position) => !position.closing);
-  if (positions.length === 0) return { reply: "<b>Meteora live</b> · No hay posiciones abiertas." };
+  if (positions.length === 0) return { reply: "<b>Meteora live</b> · No open positions." };
   if (query == null) {
     if (open.length === 1) return { address: open[0].address, name: open[0].name };
-    if (open.length === 0) return { reply: `<b>Meteora live</b> · ${positions.map((position) => escapeHtml(position.name)).join(", ")} ya se están cerrando.` };
-    return { reply: `<b>Meteora live</b> · Hay ${open.length}. Escribe cerrar y el nombre:\n${open.map((position) => `• ${escapeHtml(position.name)}`).join("\n")}` };
+    if (open.length === 0) return { reply: `<b>Meteora live</b> · ${positions.map((position) => escapeHtml(position.name)).join(", ")} already closing.` };
+    return { reply: `<b>Meteora live</b> · ${open.length} open. Type close and the name:\n${open.map((position) => `• ${escapeHtml(position.name)}`).join("\n")}` };
   }
   const needle = query.toLowerCase();
   const hits = open.filter((position) => position.name.toLowerCase().includes(needle));
   if (hits.length === 1) return { address: hits[0].address, name: hits[0].name };
   if (hits.length === 0) {
     const closing = positions.find((position) => position.closing && position.name.toLowerCase().includes(needle));
-    if (closing) return { reply: `<b>Meteora live</b> · ${escapeHtml(closing.name)} ya se está cerrando.` };
-    return { reply: "<b>Meteora live</b> · No hay una posición con ese nombre." };
+    if (closing) return { reply: `<b>Meteora live</b> · ${escapeHtml(closing.name)} is already closing.` };
+    return { reply: "<b>Meteora live</b> · No position with that name." };
   }
-  return { reply: `<b>Meteora live</b> · Hay varias. Escribe más del nombre:\n${hits.map((position) => `• ${escapeHtml(position.name)}`).join("\n")}` };
+  return { reply: `<b>Meteora live</b> · Several match. Type more of the name:\n${hits.map((position) => `• ${escapeHtml(position.name)}`).join("\n")}` };
 }
 
 export type IncomingTelegram = { updateId: number; chatId: string; text: string };
@@ -176,7 +176,7 @@ export async function readTelegramUpdates(config: TelegramConfig, offset: number
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`Telegram respondió ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Telegram returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }
   const body = (await response.json()) as { ok?: boolean; result?: unknown };
   if (!body.ok || !Array.isArray(body.result)) return [];
@@ -206,6 +206,6 @@ export async function sendTelegram(config: TelegramConfig, text: string): Promis
   if (!response.ok) {
     // Never echo the URL: it contains the bot token.
     const detail = await response.text().catch(() => "");
-    throw new Error(`Telegram respondió ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Telegram returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }
 }

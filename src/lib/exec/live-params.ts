@@ -56,20 +56,20 @@ export type LivePreset = {
 export const LIVE_PRESETS: LivePreset[] = [
   {
     id: "recomendado",
-    name: "Recomendado",
-    blurb: "25% por posición, filtro Decoder, +8% / −20% / 24 h. Backtest de un mes: +5% a +7% con comisiones realistas, −2% a 0% con pesimistas. Peor posición −21%.",
+    name: "Recommended",
+    blurb: "25% per position, Decoder filter, +8% / −20% / 24 h. One-month backtest: +5% to +7% with realistic fees, −2% to 0% with pessimistic ones. Worst position −21%.",
     params: DEFAULT_LIVE_PARAMS,
   },
   {
     id: "conservador",
-    name: "Conservador",
-    blurb: "Solo pools de 14+ días y TVL de 50k+. Peor posición −10%, pero en el backtest el mes cerró en −2% a −4%.",
+    name: "Conservative",
+    blurb: "Only pools 14+ days old with 50k+ TVL. Worst position −10%, but in the backtest the month closed at −2% to −4%.",
     params: { ...DEFAULT_LIVE_PARAMS, minTvl: 50_000, minFees24h: 2_000, minAgeDays: 14 },
   },
   {
     id: "agresivo",
-    name: "Agresivo",
-    blurb: "Filtros más bajos, toma +12%, stop −30%, 48 h. Backtest: +23% con comisiones realistas, +6% pesimistas, peor −8%. Ojo: solo 36 posiciones y entra a pools chicos, los que más se hunden.",
+    name: "Aggressive",
+    blurb: "Lower filters, take profit +12%, stop −30%, 48 h. Backtest: +23% with realistic fees, +6% pessimistic, worst −8%. Caution: only 36 positions, and it enters small pools, the ones that sink the most.",
     params: {
       ...DEFAULT_LIVE_PARAMS,
       minTvl: 5_000,

@@ -30,12 +30,12 @@ async function fetchSnaps(): Promise<PoolSnap[]> {
 async function scan() {
   const snaps = await fetchSnaps();
   const candidates = snaps.filter((snap) => passes(snap, DECODER_RULES));
-  console.log(`Pools con SOL visibles: ${snaps.length}. Pasan el filtro tipo Decoder (TVL ≥ 10k US$, comisiones 24h ≥ 1k US$, base fee ≥ 1%, volumen 1h ≥ 10k US$): ${candidates.length}\n`);
+  console.log(`Visible SOL pools: ${snaps.length}. Passing the Decoder-style filter (TVL ≥ $10k, 24h fees ≥ $1k, base fee ≥ 1%, 1h volume ≥ $10k): ${candidates.length}\n`);
   const ratios = candidates.map(feeTvl24h).sort((a, b) => a - b);
   const q = (p: number) => ratios[Math.min(ratios.length - 1, Math.floor(p * ratios.length))] ?? 0;
-  console.log(`Comisiones 24h / TVL de los candidatos: mediana ${pct(q(0.5))}, p25 ${pct(q(0.25))}, p75 ${pct(q(0.75))}, p90 ${pct(q(0.9))}`);
-  console.log("(Es lo que cobraría el pool completo en un día; tu posición Bid-Ask solo cobra mientras el precio esté dentro de su rango.)\n");
-  console.log("pool                         TVL US$   comis.24h/TVL  base fee  bin step");
+  console.log(`Candidates' 24h fees / TVL: median ${pct(q(0.5))}, p25 ${pct(q(0.25))}, p75 ${pct(q(0.75))}, p90 ${pct(q(0.9))}`);
+  console.log("(That is what the whole pool would earn in a day; your Bid-Ask position only earns while price is inside its range.)\n");
+  console.log("pool                         TVL USD   fees24h/TVL    base fee  bin step");
   for (const snap of [...candidates].sort((a, b) => feeTvl24h(b) - feeTvl24h(a)).slice(0, 25)) {
     console.log(
       `${snap.name.slice(0, 26).padEnd(26)} ${Math.round(snap.tvl).toLocaleString("en-US").padStart(10)}   ${pct(feeTvl24h(snap)).padStart(10)}   ${String(snap.baseFeePct).padStart(6)}%  ${String(snap.binStep).padStart(6)}`,
@@ -48,7 +48,7 @@ async function collect() {
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   await appendFile(file, snaps.map((snap) => JSON.stringify(snap)).join("\n") + "\n");
-  console.log(`${new Date().toISOString()} ${snaps.length} pools guardados en ${file}`);
+  console.log(`${new Date().toISOString()} ${snaps.length} pools saved to ${file}`);
 }
 
 async function report() {
@@ -70,34 +70,34 @@ async function report() {
     }
   }
   if (snaps.length === 0) {
-    console.log(`No hay fotos en ${dir}. Corre "collect" cada 15 min al menos 2-3 días.`);
+    console.log(`No snapshots in ${dir}. Run "collect" every 15 min for at least 2-3 days.`);
     return;
   }
   const times = [...new Set(snaps.map((s) => s.t))].sort((a, b) => a - b);
   const days = (times.at(-1)! - times[0]) / 86_400_000;
-  console.log(`${times.length} fotos en ${days.toFixed(1)} días, ${new Set(snaps.map((s) => s.address)).size} pools.\n`);
+  console.log(`${times.length} snapshots over ${days.toFixed(1)} days, ${new Set(snaps.map((s) => s.address)).size} pools.\n`);
 
   for (const exits of [DECODER_EXITS, { ...DECODER_EXITS, stopLoss: 0.1 }, { ...DECODER_EXITS, holdHours: 72 }]) {
     const r = forwardTest(snaps, DECODER_RULES, DECODER_SHAPE, exits);
-    console.log(`Bid-Ask SOL -75%, TP ${pct(exits.takeProfit, 0)}, stop ${pct(exits.stopLoss, 0)}, máx ${exits.holdHours} h:`);
+    console.log(`Bid-Ask SOL -75%, TP ${pct(exits.takeProfit, 0)}, stop ${pct(exits.stopLoss, 0)}, max ${exits.holdHours} h:`);
     if (r.trades.length === 0) {
-      console.log("  Aún no hay posiciones completas; hace falta más historia.\n");
+      console.log("  No complete positions yet; more history needed.\n");
       continue;
     }
     const reasons = new Map<string, number>();
     for (const trade of r.trades) reasons.set(trade.reason, (reasons.get(trade.reason) ?? 0) + 1);
-    console.log(`  posiciones ${r.trades.length} · ganadoras ${pct(r.winRate, 0)} · media ${pct(r.mean, 2)} · mediana ${pct(r.median, 2)} · peor ${pct(r.worst)}`);
-    console.log(`  token cayó > 60% con la posición abierta: ${pct(r.crashRate)} de las veces`);
-    console.log(`  salidas: ${[...reasons].map(([k, v]) => `${k} ${v}`).join(", ")}`);
-    console.log(`  comisiones estimadas (optimistas) promedio por posición: ${pct(r.trades.reduce((s, t) => s + t.fees, 0) / r.trades.length, 2)}\n`);
+    console.log(`  positions ${r.trades.length} · winners ${pct(r.winRate, 0)} · mean ${pct(r.mean, 2)} · median ${pct(r.median, 2)} · worst ${pct(r.worst)}`);
+    console.log(`  token fell > 60% while the position was open: ${pct(r.crashRate)} of the time`);
+    console.log(`  exits: ${[...reasons].map(([k, v]) => `${k} ${v}`).join(", ")}`);
+    console.log(`  estimated fees (optimistic) average per position: ${pct(r.trades.reduce((s, t) => s + t.fees, 0) / r.trades.length, 2)}\n`);
   }
-  console.log("Las comisiones son una cota optimista: si la media sale negativa, la estrategia pierde de verdad.");
+  console.log("Fees are an optimistic upper bound: if the mean comes out negative, the strategy really loses.");
 }
 
 const command = process.argv[2] ?? "scan";
 const run = { scan, collect, report }[command as "scan" | "collect" | "report"];
 if (!run) {
-  console.log("Uso: npm run meteora -- scan | collect | report");
+  console.log("Usage: npm run meteora -- scan | collect | report");
   process.exit(1);
 }
 run().catch((error: unknown) => {

@@ -19,9 +19,9 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function challenge(): NextResponse {
-  return new NextResponse("Se requiere usuario y contraseña.", {
+  return new NextResponse("Username and password required.", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Bot de estrategia", charset="UTF-8"', "Cache-Control": "no-store" },
+    headers: { "WWW-Authenticate": 'Basic realm="PolloTraderBot", charset="UTF-8"', "Cache-Control": "no-store" },
   });
 }
 
@@ -30,7 +30,7 @@ export function proxy(request: NextRequest) {
   if (!password) {
     const host = (request.headers.get("host") ?? "").replace(/:\d+$/, "");
     if (LOCAL_HOSTS.has(host)) return NextResponse.next();
-    return new NextResponse("BOT_PASSWORD no está configurada. El bot solo responde en localhost.", { status: 503 });
+    return new NextResponse("BOT_PASSWORD is not set. The bot only answers on localhost.", { status: 503 });
   }
 
   const header = request.headers.get("authorization") ?? "";

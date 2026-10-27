@@ -45,7 +45,7 @@ for (const file of fileList) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(path.join(root, file), target);
 }
-console.log(`DLMM: ${fileList.size} archivos rastreados`);
+console.log(`DLMM: ${fileList.size} files traced`);
 
 // Next links hashed external names (`.next/node_modules/@solana/web3.js-<hash>`) to node_modules.
 // Windows installers do not keep symlinks, and a copied folder would load a second web3.js: the
@@ -79,11 +79,11 @@ shimLinks(path.join(standalone, ".next", "node_modules"));
   for (const name of hashed) {
     const appWeb3 = fromStandalone(path.join(solanaDir, name));
     if (appWeb3.Transaction !== fromStandalone(sdkWeb3).Transaction) {
-      console.error(`Dos copias de @solana/web3.js en el servidor (${name} y la del SDK). Las transacciones de Meteora fallarían.`);
+      console.error(`Two copies of @solana/web3.js in the server (${name} and the SDK one). Meteora transactions would fail.`);
       process.exit(1);
     }
   }
-  console.log(`web3.js: una sola instancia (${hashed.length} alias)`);
+  console.log(`web3.js: single instance (${hashed.length} aliases)`);
 }
 
 // Secrets never ship: drop any env file the build may have copied.

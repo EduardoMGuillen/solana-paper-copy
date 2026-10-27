@@ -3,7 +3,7 @@
  *
  * Runs the Next.js standalone server in an Electron utility process, bound to
  * 127.0.0.1 on a free port, and shows it in a native window. Closing the window
- * hides it to the tray so Meteora live keeps watching open positions; "Salir"
+ * hides it to the tray so Meteora live keeps watching open positions; "Quit"
  * in the tray stops everything.
  *
  * The private key and the RPC URL never cross HTTP: the import form and the
@@ -70,7 +70,7 @@ function freePort(): Promise<number> {
     probe.once("error", reject);
     probe.listen(0, "127.0.0.1", () => {
       const address = probe.address();
-      probe.close(() => (address && typeof address === "object" ? resolve(address.port) : reject(new Error("sin puerto"))));
+      probe.close(() => (address && typeof address === "object" ? resolve(address.port) : reject(new Error("no port"))));
     });
   });
 }
@@ -84,7 +84,7 @@ function waitForServer(url: string, timeoutMs = 60_000): Promise<void> {
         resolve();
       });
       request.on("error", () => {
-        if (Date.now() > deadline) reject(new Error("El servidor no arrancó."));
+        if (Date.now() > deadline) reject(new Error("The server did not start."));
         else setTimeout(attempt, 300);
       });
     };
@@ -166,14 +166,14 @@ function createWindow(): void {
 
 function createTray(): void {
   tray = new Tray(nativeImage.createFromPath(resource("tray.png")));
-  tray.setToolTip(`${APP_NAME}: el bot sigue corriendo`);
+  tray.setToolTip(`${APP_NAME}: the bot keeps running`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Abrir ${APP_NAME}`, click: showWindow },
-      { label: "Abrir configuración", click: () => void shell.openPath(app.getPath("userData")) },
+      { label: `Open ${APP_NAME}`, click: showWindow },
+      { label: "Open config folder", click: () => void shell.openPath(app.getPath("userData")) },
       { type: "separator" },
       {
-        label: "Salir (detiene el bot)",
+        label: "Quit (stops the bot)",
         click: () => {
           quitting = true;
           app.quit();
@@ -199,18 +199,18 @@ function fromApp(event: Electron.IpcMainInvokeEvent): boolean {
 }
 
 ipcMain.handle("settings:get", (event) => {
-  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
+  if (!fromApp(event)) return { ok: false, error: "Origin not allowed." };
   const config = loadConfig();
   return { ok: true, rpc: maskRpc(config.SOLANA_RPC_URL), address: readWalletAddress(liveDir()) };
 });
 
 ipcMain.handle("rpc:save", async (event, url: unknown) => {
-  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
-  if (typeof url !== "string") return { ok: false, error: "Falta la URL." };
+  if (!fromApp(event)) return { ok: false, error: "Origin not allowed." };
+  if (typeof url !== "string") return { ok: false, error: "Missing URL." };
   const value = url.trim();
   try {
     if (value) await probeRpc(value);
-    if (orderInFlight()) return { ok: false, error: "Hay una orden en curso. Prueba de nuevo en un minuto." };
+    if (orderInFlight()) return { ok: false, error: "An order is in flight. Try again in a minute." };
     const file = configFile();
     fs.writeFileSync(file, setEnvValue(fs.readFileSync(file, "utf8"), "SOLANA_RPC_URL", value), { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(file, 0o600);
@@ -218,30 +218,30 @@ ipcMain.handle("rpc:save", async (event, url: unknown) => {
     server?.kill();
     return { ok: true, rpc: maskRpc(value) };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "No se pudo guardar." };
+    return { ok: false, error: error instanceof Error ? error.message : "Could not save." };
   }
 });
 
 ipcMain.handle("wallet:replace", (event, secret: unknown, address: unknown, confirm: unknown) => {
-  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
-  if (typeof secret !== "string") return { ok: false, error: "Falta la clave." };
-  if (orderInFlight()) return { ok: false, error: "Hay una orden en curso. Prueba de nuevo en un minuto." };
+  if (!fromApp(event)) return { ok: false, error: "Origin not allowed." };
+  if (typeof secret !== "string") return { ok: false, error: "Missing key." };
+  if (orderInFlight()) return { ok: false, error: "An order is in flight. Try again in a minute." };
   try {
     const replaced = replaceDedicatedWallet(liveDir(), secret, typeof address === "string" ? address : "", typeof confirm === "string" ? confirm : "", serverDir());
     return { ok: true, address: replaced };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "No se pudo cambiar la wallet." };
+    return { ok: false, error: error instanceof Error ? error.message : "Could not change the wallet." };
   }
 });
 
 ipcMain.handle("wallet:import", (event, secret: unknown, address: unknown) => {
-  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
-  if (typeof secret !== "string") return { ok: false, error: "Falta la clave." };
+  if (!fromApp(event)) return { ok: false, error: "Origin not allowed." };
+  if (typeof secret !== "string") return { ok: false, error: "Missing key." };
   try {
     const imported = importDedicatedWallet(liveDir(), secret, typeof address === "string" ? address : undefined, serverDir());
     return { ok: true, address: imported };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "No se pudo importar." };
+    return { ok: false, error: error instanceof Error ? error.message : "Could not import." };
   }
 });
 
@@ -265,7 +265,7 @@ if (!app.requestSingleInstanceLock()) {
     server?.kill();
   });
   app.on("window-all-closed", () => {
-    // Keep running in the tray; only "Salir" quits.
+    // Keep running in the tray; only "Quit" quits.
   });
 
   void app.whenReady().then(async () => {

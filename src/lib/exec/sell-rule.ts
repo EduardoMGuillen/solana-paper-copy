@@ -7,7 +7,7 @@
 export const MIN_SELL_LAMPORTS = 1_000_000;
 
 /** A leftover this small is dropped instead of retried. */
-export const DUST_SELL_REASON = "El token que quedó no paga la venta. Se quedó en la wallet.";
+export const DUST_SELL_REASON = "The leftover token is not worth the sale. It stayed in the wallet.";
 
 export function impactTooHigh(priceImpactPercent: number, maxImpactBps: number): boolean {
   if (!Number.isFinite(priceImpactPercent) || priceImpactPercent < 0) return true;
@@ -24,9 +24,9 @@ export function decideSell(input: {
   if (input.rawAmount <= BigInt(0)) return { sell: false, reason: "none" };
   if (input.outLamports <= BigInt(0) || impactTooHigh(input.priceImpactPercent, input.maxImpactBps)) {
     if (input.outLamports <= BigInt(0) || !Number.isFinite(input.priceImpactPercent)) {
-      return { sell: false, reason: "No hay una salida a SOL. El token se quedó en la wallet." };
+      return { sell: false, reason: "No exit to SOL. The token stayed in the wallet." };
     }
-    return { sell: false, reason: "La venta pasaría el tope de impacto. El token se quedó en la wallet." };
+    return { sell: false, reason: "The sale would exceed the impact cap. The token stayed in the wallet." };
   }
   if (input.outLamports < BigInt(MIN_SELL_LAMPORTS)) {
     return { sell: false, reason: DUST_SELL_REASON };
