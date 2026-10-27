@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PolloTraderBot</title>
+  <meta name="description" content="PolloTraderBot: a desktop bot that provides single-sided SOL liquidity on Meteora DLMM pools, with automatic exits. Your keys never leave your computer.">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #000;
+      --fg: #00ff41;
+      --dim: #0b8a2c;
+      --muted: #5fae75;
+      --line: #0d4a1f;
+      --panel: rgba(0, 20, 6, 0.82);
+      --red: #ff3b3b;
+      --amber: #ffb000;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Fira Code", ui-monospace, monospace;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    #rain { position: fixed; inset: 0; z-index: 0; opacity: 0.35; pointer-events: none; }
+    .scanlines { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, 0.25) 2px 3px); }
+    main, header, footer { position: relative; z-index: 2; }
+    a { color: inherit; }
+    .wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+    .glow { text-shadow: 0 0 6px rgba(0, 255, 65, 0.7), 0 0 18px rgba(0, 255, 65, 0.35); }
+    .muted { color: var(--muted); }
+
+    header { position: sticky; top: 0; border-bottom: 1px solid var(--line); background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(6px); }
+    nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 700; letter-spacing: 0.2em; }
+    .brand img { width: 36px; height: 36px; image-rendering: pixelated; }
+    .links { display: flex; gap: 20px; font-size: 14px; }
+    .links a { text-decoration: none; color: var(--muted); }
+    .links a:hover { color: var(--fg); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 46px; padding: 0 22px; border: 1px solid var(--fg);
+      font: inherit; font-weight: 700; letter-spacing: 0.12em; text-decoration: none; cursor: pointer;
+      background: var(--fg); color: #000; transition: box-shadow 0.15s;
+    }
+    .btn:hover { box-shadow: 0 0 18px rgba(0, 255, 65, 0.6); }
+    .btn.ghost { background: transparent; color: var(--fg); }
+    .btn[disabled] { cursor: not-allowed; opacity: 0.55; box-shadow: none; }
+
+    .hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center; padding: 88px 0 72px; }
+    .prompt { color: var(--muted); font-size: 14px; }
+    h1 { font-size: clamp(34px, 5.4vw, 60px); line-height: 1.08; margin: 12px 0 20px; letter-spacing: -0.01em; }
+    h1 .accent { color: #c8ffd6; }
+    .lead { font-size: 17px; color: #b6f5c6; max-width: 56ch; }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .cursor::after { content: "█"; animation: blink 1s steps(1) infinite; margin-left: 2px; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .term { border: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+    .term-head { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--line); background: rgba(13, 74, 31, 0.3); font-weight: 700; letter-spacing: 0.1em; font-size: 12px; }
+    .term-body { padding: 14px; display: grid; gap: 6px; }
+    .row { display: flex; justify-content: space-between; gap: 12px; }
+    .up { color: var(--fg); }
+    .down { color: var(--red); }
+    .warn { color: var(--amber); }
+
+    section { padding: 72px 0; border-top: 1px solid var(--line); }
+    h2 { font-size: clamp(24px, 3.4vw, 34px); margin: 0 0 8px; }
+    h2::before { content: "┌─[ "; color: var(--dim); }
+    h2::after { content: " ]"; color: var(--dim); }
+    .sub { color: var(--muted); margin: 0 0 36px; max-width: 70ch; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
+    .card { border: 1px solid var(--line); background: var(--panel); padding: 22px; }
+    .card h3 { margin: 0 0 8px; font-size: 17px; }
+    .card p { margin: 0; color: #a8e8b8; font-size: 14px; }
+    .tag { font-size: 12px; color: var(--muted); letter-spacing: 0.12em; }
+    .step-n { font-size: 32px; font-weight: 700; color: var(--dim); }
+
+    table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: 0.12em; }
+    .table-wrap { border: 1px solid var(--line); background: var(--panel); overflow-x: auto; }
+
+    .mint { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+    .nft { position: relative; border: 1px solid var(--fg); box-shadow: 0 0 40px rgba(0, 255, 65, 0.25); }
+    .nft img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+    .badge { position: absolute; top: 14px; right: 14px; background: var(--amber); color: #000; font-weight: 700; padding: 4px 10px; font-size: 12px; letter-spacing: 0.12em; }
+    .mint-box { border: 1px solid var(--line); background: var(--panel); padding: 26px; display: grid; gap: 16px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .stat { border: 1px solid var(--line); padding: 12px; }
+    .stat b { display: block; font-size: 20px; }
+    .stat span { font-size: 12px; color: var(--muted); }
+    .bar { height: 10px; border: 1px solid var(--line); }
+    .bar i { display: block; height: 100%; width: 0; background: var(--fg); }
+    form.notify { display: flex; gap: 8px; flex-wrap: wrap; }
+    form.notify input { flex: 1 1 220px; min-height: 46px; padding: 0 14px; background: #000; color: var(--fg); border: 1px solid var(--line); font: inherit; }
+    form.notify input:focus { outline: 1px solid var(--fg); }
+
+    details { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px; margin-bottom: 10px; }
+    summary { cursor: pointer; font-weight: 700; }
+    details p { color: #a8e8b8; margin: 10px 0 0; }
+
+    footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 13px; color: var(--muted); }
+    .risk { border: 1px solid rgba(255, 176, 0, 0.5); padding: 16px; color: #ffd27a; margin-bottom: 20px; }
+
+    @media (max-width: 860px) {
+      .hero, .mint { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .links { display: none; }
+      .hero { padding-top: 48px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #rain { display: none; }
+      .cursor::after { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="rain" aria-hidden="true"></canvas>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header>
+    <nav class="wrap">
+      <a class="brand glow" href="#top"><img src="logo.svg" alt="">POLLOTRADERBOT</a>
+      <div class="links">
+        <a href="#how">How it works</a>
+        <a href="#features">Features</a>
+        <a href="#strategies">Strategies</a>
+        <a href="#mint">NFT</a>
+        <a href="#faq">FAQ</a>
+      </div>
+      <a class="btn ghost" href="#access">Get access</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="wrap hero">
+      <div>
+        <div class="prompt">root@pollo:~$ ./start --mode=live</div>
+        <h1 class="glow">Your SOL,<br><span class="accent">farming fees</span><br>while you sleep.</h1>
+        <p class="lead">PolloTraderBot is a desktop bot that puts single-sided SOL liquidity into Meteora DLMM pools, picks the pools that pay the most fees, and closes positions on its own: take profit, stop loss and time limit.</p>
+        <div class="cta">
+          <a class="btn" href="#access">▶ Get early access</a>
+          <a class="btn ghost" href="#mint">Mint the NFT</a>
+        </div>
+        <p class="muted" style="font-size:13px;margin-top:18px">Windows · Linux · Your keys stay on your computer</p>
+      </div>
+
+      <div class="term" aria-label="Example of the bot dashboard">
+        <div class="term-head"><span>┌─[ positions ]</span><span class="up">■ RUNNING</span></div>
+        <div class="term-body">
+          <div class="row muted"><span>POOL</span><span>SIZE</span><span>P&amp;L</span></div>
+          <div class="row"><span>MEME-SOL</span><span>0.25 SOL</span><span class="up">▲ +5.3%</span></div>
+          <div class="row"><span>CHAD-SOL</span><span>0.14 SOL</span><span class="up">▲ +1.2%</span></div>
+          <div class="row"><span>FROG-SOL</span><span>0.16 SOL</span><span class="down">▼ −0.8%</span></div>
+          <div class="row muted" style="margin-top:8px"><span>root@pollo:~$ <span class="cursor">scanning 255 pools…</span></span></div>
+          <div class="row warn" style="font-size:12px"><span>[demo data, not real results]</span></div>
+        </div>
+      </div>
+    </div>
+
+    <section id="how">
+      <div class="wrap">
+        <h2>How it works</h2>
+        <p class="sub">Three steps. No browser extension, no web wallet connection, no custody.</p>
+        <div class="grid">
+          <div class="card"><div class="step-n">01</div><h3>Install and import</h3><p>Download the app for Windows or Linux and import a dedicated wallet. The key is written only to a private file on your computer.</p></div>
+          <div class="card"><div class="step-n">02</div><h3>Pick a profile</h3><p>Choose Recommended, Conservative or Aggressive, or tune your own filters, exits and position size. Hard limits live in your config file.</p></div>
+          <div class="card"><div class="step-n">03</div><h3>Press START</h3><p>Every 15 seconds the bot screens Meteora pools, opens Bid-Ask positions in SOL and exits by rule. STOP closes everything.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>Features</h2>
+        <p class="sub">Built for people who want DLMM fees without staring at charts all day.</p>
+        <div class="grid">
+          <div class="card"><span class="tag">STRATEGY</span><h3>Single-sided SOL, Bid-Ask</h3><p>Liquidity sits below the price and earns fees as the market trades through it. You never buy the token up front.</p></div>
+          <div class="card"><span class="tag">SCREENING</span><h3>Fee-first pool picking</h3><p>Filters by TVL, 24 h fees, base fee, hourly volume and pool age, then ranks by fees per dollar of liquidity.</p></div>
+          <div class="card"><span class="tag">EXITS</span><h3>Automatic exits</h3><p>Take profit, stop loss, max hold time and sudden-drop protection, measured on the position's real on-chain value.</p></div>
+          <div class="card"><span class="tag">SECURITY</span><h3>Keys never leave your PC</h3><p>No servers, no custody. The key never travels over the network; the app signs locally with a wallet used only for the bot.</p></div>
+          <div class="card"><span class="tag">CONTROL</span><h3>Telegram and kill switch</h3><p>Status digests and commands on Telegram, per-position close buttons and an emergency stop file.</p></div>
+          <div class="card"><span class="tag">DESKTOP</span><h3>Runs in the tray</h3><p>Close the window and the bot keeps watching your positions. Bring your own RPC (Helius, QuickNode) for speed.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="strategies">
+      <div class="wrap">
+        <h2>Strategy profiles</h2>
+        <p class="sub">Every profile can be tuned. Backtests use Meteora's public data and simplified fee models; they are estimates, not a promise of future returns.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>PROFILE</th><th>POOLS</th><th>TAKE PROFIT</th><th>STOP LOSS</th><th>MAX HOLD</th><th>FOR</th></tr></thead>
+            <tbody>
+              <tr><td>Conservative</td><td>Mature, TVL ≥ $50k, ≥ 14 days old</td><td>+8%</td><td>−20%</td><td>24 h</td><td>Lower risk, fewer trades</td></tr>
+              <tr><td class="up">Recommended</td><td>TVL ≥ $10k, fees ≥ $1k/24 h</td><td>+8%</td><td>−20%</td><td>24 h</td><td>Balanced default</td></tr>
+              <tr><td class="warn">Aggressive</td><td>TVL ≥ $5k, fees ≥ $500/24 h</td><td>+12%</td><td>−30%</td><td>48 h</td><td>Higher fees, higher risk</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="mint">
+      <div class="wrap mint">
+        <div class="nft">
+          <img src="nft.png" alt="PolloTraderBot NFT: green pixel chicken over falling binary digits" width="1024" height="1024">
+          <span class="badge">COMING SOON</span>
+        </div>
+        <div>
+          <h2>Mint NOW</h2>
+          <p class="sub" style="margin-bottom:20px">The PolloTrader NFT collection on Solana. Holder perks are planned for the bot. Mint is not open yet.</p>
+          <div class="mint-box">
+            <div class="stats">
+              <div class="stat"><b>TBA</b><span>Supply</span></div>
+              <div class="stat"><b>TBA</b><span>Price (SOL)</span></div>
+              <div class="stat"><b>Solana</b><span>Chain</span></div>
+            </div>
+            <div>
+              <div class="row muted" style="font-size:12px"><span>Minted</span><span>0 / TBA</span></div>
+              <div class="bar"><i></i></div>
+            </div>
+            <button class="btn" type="button" disabled>MINT NOW · COMING SOON</button>
+            <form class="notify" id="notify">
+              <input type="email" required placeholder="you@email.com" aria-label="Email for mint updates">
+              <button class="btn ghost" type="submit">Notify me</button>
+            </form>
+            <p class="muted" id="notify-msg" style="font-size:13px;margin:0" role="status">Get an email when the mint opens.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="access">
+      <div class="wrap" style="text-align:center">
+        <h2>Early access</h2>
+        <p class="sub" style="margin-inline:auto">PolloTraderBot is in private beta. Join the list to get the download for Windows and Linux.</p>
+        <a class="btn" href="#mint">▶ Join the list</a>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="wrap">
+        <h2>FAQ</h2>
+        <details><summary>Do you ever hold my funds or keys?</summary><p>No. The app runs on your computer and signs locally. There is no PolloTraderBot server and nothing to log into.</p></details>
+        <details><summary>Can I lose money?</summary><p>Yes. If a token drops, a Bid-Ask position turns into that token and loses value. Stop loss limits the damage but cannot remove it. Only use funds you can afford to lose.</p></details>
+        <details><summary>Does it keep running when my PC is off?</summary><p>Positions stay open on Meteora and keep earning fees, but exits only run while the app is open. Keep it running, press STOP before shutting down, or run it on a server.</p></details>
+        <details><summary>How much SOL do I need?</summary><p>Each position needs about 0.1 SOL of refundable rent plus its stake. Around 1 SOL is a comfortable start.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="risk">⚠ Risk warning: providing liquidity on memecoin pools is high risk. Past or backtested results do not guarantee future returns. PolloTraderBot is software, not financial advice.</div>
+      <div class="row" style="flex-wrap:wrap"><span>© 2026 PolloTraderBot</span><span>Built on Solana · Meteora DLMM</span></div>
+    </div>
+  </footer>
+
+  <script>
+    // Binary rain behind the page.
+    (() => {
+      const canvas = document.getElementById("rain");
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const ctx = canvas.getContext("2d");
+      const size = 16;
+      let drops = [];
+      function resize() {
+        canvas.width = innerWidth;
+        canvas.height = innerHeight;
+        drops = Array.from({ length: Math.ceil(canvas.width / size) }, () => Math.random() * -50);
+      }
+      resize();
+      addEventListener("resize", resize);
+      setInterval(() => {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.08)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#00ff41";
+        ctx.font = `${size}px "Fira Code", monospace`;
+        drops.forEach((y, i) => {
+          ctx.fillText(Math.random() < 0.5 ? "0" : "1", i * size, y * size);
+          drops[i] = y * size > canvas.height && Math.random() > 0.975 ? 0 : y + 1;
+        });
+      }, 60);
+    })();
+
+    // Mockup only: nothing is sent anywhere yet.
+    document.getElementById("notify").addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.target.reset();
+      document.getElementById("notify-msg").textContent = "[OK] You're on the list. (Demo: no email was sent yet.)";
+    });
+  </script>
+</body>
+</html>
