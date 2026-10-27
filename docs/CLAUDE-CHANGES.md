@@ -6,6 +6,16 @@ Agrega una entrada cada vez que Claude haga un commit.
 
 ---
 
+## 2026-10-26 · `71d001d` · App de escritorio: una sola copia de web3.js
+
+**Qué cambió:**
+- El build de escritorio reemplaza el symlink de Next a `@solana/web3.js` por un paquete de una línea que reexporta el módulo real, en lugar de una copia.
+- El build se detiene si la web3.js de la app y la del SDK de Meteora no son la misma.
+
+**Por qué:**
+- Con la copia había dos web3.js cargadas. La transacción del SDK no pasaba `instanceof Transaction` y la simulación fallaba con "Cannot read properties of undefined (reading 'numRequiredSignatures')".
+- Todas las aperturas fallaban antes de firmar: no se movió SOL. El error salió en el primer Start real.
+
 ## 2026-10-26 · `fbc5e3c` · Meteora live: sin reabrir al +10%, 25% por defecto, filtro de antigüedad e historial
 
 **Qué cambió:**
