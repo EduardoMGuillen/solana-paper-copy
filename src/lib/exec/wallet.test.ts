@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Keypair } from "@solana/web3.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertOutsideRepo,
   createDedicatedWallet,
   decodeBase58,
   encodeBase58,
+  importDedicatedWallet,
   parseAccountLamports,
   parseLamports,
   portfolioView,
@@ -46,6 +48,73 @@ describe("wallet address", () => {
 
   it("rejects a symbol that is not base58", () => {
     expect(() => decodeBase58("0OIl")).toThrow(/inválida/);
+  });
+});
+
+describe("imported wallet", () => {
+  it("imports a Phantom base58 secret and writes it like solana-keygen, owner-only", () => {
+    const dir = tempDir();
+    const pair = Keypair.generate();
+    const address = importDedicatedWallet(dir, encodeBase58(pair.secretKey), pair.publicKey.toBase58());
+    expect(address).toBe(pair.publicKey.toBase58());
+    expect(readWalletAddress(dir)).toBe(address);
+    const secret = JSON.parse(fs.readFileSync(path.join(dir, "wallet.json"), "utf8")) as number[];
+    expect(secret).toEqual([...pair.secretKey]);
+    if (process.platform !== "win32") expect(fs.statSync(path.join(dir, "wallet.json")).mode & 0o777).toBe(0o600);
+    expect(fs.existsSync(path.join(dir, "intents.jsonl"))).toBe(true);
+  });
+
+  it("imports a solana-keygen JSON array", () => {
+    const dir = tempDir();
+    const pair = Keypair.generate();
+    expect(importDedicatedWallet(dir, JSON.stringify([...pair.secretKey]))).toBe(pair.publicKey.toBase58());
+  });
+
+  it("refuses a key for another address and writes nothing", () => {
+    const dir = tempDir();
+    const pair = Keypair.generate();
+    expect(() => importDedicatedWallet(dir, encodeBase58(pair.secretKey), Keypair.generate().publicKey.toBase58())).toThrow(/no corresponde/);
+    expect(fs.existsSync(path.join(dir, "wallet.json"))).toBe(false);
+  });
+
+  it("refuses a secret whose public half is not its seed's, without echoing the secret", () => {
+    const dir = tempDir();
+    const secret = Uint8Array.from([...Keypair.generate().secretKey.slice(0, 32), ...Keypair.generate().publicKey.toBytes()]);
+    const text = encodeBase58(secret);
+    let message = "";
+    try {
+      importDedicatedWallet(dir, text);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/no es válida/);
+    expect(message).not.toContain(text.slice(0, 12));
+  });
+
+  it("rejects text that is not a 64-byte key without echoing it", () => {
+    const dir = tempDir();
+    for (const bad of ["", "0OIl-not-base58", encodeBase58(new Uint8Array(32).fill(7)), "[1,2,3]", "[" + "300,".repeat(63) + "300]"]) {
+      expect(() => importDedicatedWallet(dir, bad)).toThrow(/clave privada/);
+    }
+    try {
+      importDedicatedWallet(dir, "secretoSecretoSecreto");
+    } catch (error) {
+      expect((error as Error).message).not.toContain("secretoSecreto");
+    }
+  });
+
+  it("keeps an existing wallet: same key is a no-op, a different key is refused", () => {
+    const dir = tempDir();
+    const pair = Keypair.generate();
+    importDedicatedWallet(dir, encodeBase58(pair.secretKey));
+    expect(importDedicatedWallet(dir, encodeBase58(pair.secretKey))).toBe(pair.publicKey.toBase58());
+    expect(() => importDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey))).toThrow(/Ya hay una wallet/);
+    expect(readWalletAddress(dir)).toBe(pair.publicKey.toBase58());
+  });
+
+  it("refuses a folder inside the project", () => {
+    const pair = Keypair.generate();
+    expect(() => importDedicatedWallet(path.join(process.cwd(), "wallet"), encodeBase58(pair.secretKey))).toThrow(/dentro del proyecto/);
   });
 });
 

@@ -206,6 +206,55 @@ export function createDedicatedWallet(dir: string, cwd = process.cwd()): string 
   return address;
 }
 
+const BAD_SECRET = "Eso no es una clave privada de Solana. Pega la de Phantom (base58) o el arreglo de solana-keygen.";
+
+/** Phantom exports base58; solana-keygen writes a JSON array. Errors never repeat the input. */
+function parseSecret(text: string): Buffer {
+  const value = text.trim();
+  let bytes: Uint8Array;
+  try {
+    if (value.startsWith("[")) {
+      const raw = JSON.parse(value) as unknown;
+      if (!Array.isArray(raw) || !raw.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) throw new Error();
+      bytes = Uint8Array.from(raw as number[]);
+    } else {
+      bytes = decodeBase58(value);
+    }
+  } catch {
+    throw new Error(BAD_SECRET);
+  }
+  if (bytes.length !== 64) throw new Error(BAD_SECRET);
+  return Buffer.from(bytes);
+}
+
+/**
+ * Import the owner's existing key as the dedicated wallet. Same file format and
+ * permissions as `createDedicatedWallet`. Never replaces a different wallet:
+ * it may still hold SOL or open positions. Returns only the public address.
+ */
+export function importDedicatedWallet(dir: string, secretText: string, expectedAddress?: string, cwd = process.cwd()): string {
+  assertOutsideRepo(dir, cwd);
+  const secret = parseSecret(secretText);
+  const seed = secret.subarray(0, 32);
+  const pub = secret.subarray(32);
+  if (!publicFromSeed(Buffer.from(seed)).equals(pub)) throw new Error("La clave privada no es válida: su mitad pública no corresponde.");
+  const address = encodeBase58(pub);
+  if (expectedAddress?.trim() && expectedAddress.trim() !== address) throw new Error("La clave no corresponde a la dirección que indicaste.");
+
+  fs.mkdirSync(dir, { recursive: true });
+  const secretPath = secretFile(dir);
+  const publicPath = addressFile(dir);
+  if (fs.existsSync(secretPath) || fs.existsSync(publicPath)) {
+    if (readWalletAddress(dir) === address && fs.existsSync(secretPath)) return address;
+    throw new Error("Ya hay una wallet en esa carpeta. Muévela a mano antes de importar otra; puede tener fondos o posiciones.");
+  }
+  const journal = path.join(dir, "intents.jsonl");
+  if (!fs.existsSync(journal)) fs.writeFileSync(journal, "", { encoding: "utf8" });
+  fs.writeFileSync(secretPath, JSON.stringify([...secret]), { encoding: "utf8", mode: 0o600 });
+  fs.writeFileSync(publicPath, `${address}\n`, { encoding: "utf8" });
+  return address;
+}
+
 /** Wallet SOL plus each position's marked liquidity and its account rent. */
 export function portfolioView(
   balanceSol: number | null,
