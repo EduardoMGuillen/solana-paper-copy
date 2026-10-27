@@ -4,147 +4,110 @@ Read this before changing anything. It explains what the project is, how it is w
 
 ## What this is
 
-A **paper-trading bot for Solana tokens**, built with Next.js 16 and TypeScript. It has two parts:
+**PolloTraderBot**: a Meteora DLMM liquidity bot for Solana, built with Next.js 16 and TypeScript, shipped as a web dashboard and as an Electron desktop app (Windows and Linux).
 
-1. **Trend trading:** EMA crossovers and similar strategies on 4h candles from Binance. Each strategy is walk-forward validated per market, and only strategies that pass are traded.
-2. **Meteora DLMM research:** a collector and a paper simulator for Decoder-Farmer-style SOL-only Bid-Ask liquidity positions.
-
-**Trend trading moves no real money.** "Shadow mode" asks Jupiter for real quotes without a wallet, so nothing can be signed there.
-
-**Meteora live signs real transactions.** It uses a dedicated wallet kept outside the repo (`~/.solana-paper-bot` or `WALLET_DIR`). It signs only while the bot is started from the dashboard and there is no `KILL` file. `src/lib/exec/lp-chain.ts` is the only module that opens `wallet.json`. Everything else follows `docs/EJECUCION-REAL.md`:
+**It signs real transactions.** It uses a dedicated wallet kept outside the repo (`~/.solana-paper-bot` or `WALLET_DIR`). It signs only while the bot is started from the dashboard and there is no `KILL` file. `src/lib/exec/lp-chain.ts` is the only module that opens `wallet.json` to sign. Everything follows `docs/EJECUCION-REAL.md`:
 - Hard limits come from env (`LIVE_*`).
 - The journal (`intents.jsonl`) gets the signature after signing and before broadcast.
 - Each pass reconciles signed opens against the accounts on chain.
 - Exits use the position's on-chain value, fees included, never a model.
 
+The paper strategy desk, the Meteora paper book and shadow mode were removed in `67066c8`. Their code, backtests and rejected ideas are in git history.
+
 ## Commands
 
 ```bash
-npm install
+npm install            # Node 22+
 npm run dev            # dashboard on http://127.0.0.1:47231 (localhost needs no password)
 npm test               # vitest; all tests must pass
 npx tsc --noEmit -p .  # typecheck
 npm run lint           # eslint
 npm run build          # production build (must compile)
 
-npm run backtest -- 4h 9000 0.02 cruce,regimen   # interval, bars, risk per trade, strategies[, feeBps, slipBps]
-npm run rotation                                  # momentum-rotation research (rejected, kept as a record)
-npm run meteora -- scan | collect | report        # Meteora DLMM pools: screen / snapshot / forward paper test
+npm run wallet                        # create a dedicated wallet once
+npm run wallet -- import [ADDRESS]    # import the owner's key from a hidden prompt
+npm run meteora -- scan | collect | report   # Meteora DLMM pools: screen / snapshot / forward paper test (research)
+
+npm run desktop -- --linux | --win    # installers in dist-desktop/release
+npm run desktop:dev                   # unpacked app only
+npm run icons                         # regenerate desktop/icon.png and tray.png from the logo grid
 ```
 
-Before you say a change is done, run **typecheck, lint, tests and build**. All four must be green.
+Before you say a change is done, run **typecheck, lint, tests and build**. All four must be green. If you touch `desktop/` or `scripts/desktop.mjs`, also run `npm run desktop:dev` and open the unpacked app.
 
 ## Architecture
 
 ```
-Binance klines (keyless) ──► src/lib/bot/market.ts
-                                   │
-src/lib/service.ts  (server loop every 15 s, started by src/instrumentation.ts)
-  ├─ validate each market once a day: walkForward() over ~6000 bars → pick a strategy (auto mode)
-  ├─ poll each market every 30 s → engine.onCandles()
-  │     └─ sleeve.stepBar() on each CLOSED bar  ← the same function the backtester uses
-  ├─ markAccount(): equity, daily-loss / drawdown halts, daily summary
-  ├─ shadow(): Jupiter quotes for queued paper fills + hourly probes (LIVE_MODE=shadow)
-  └─ notify(): batched Telegram alerts
-State: data/bot-state.json (atomic write; PAPER_DATA_DIR overrides the folder)
-UI: src/app/page.tsx → src/components/desk.tsx, polls /api/state every 30 s; actions via POST /api/actions
+src/instrumentation.ts ─► src/lib/live-loop.ts (every 15 s)
+                            ├─ kickLiveLp()           exec/lp-runner.ts: reconcile, mark, close, retry leftovers, open
+                            └─ kickTelegramCommands() exec/telegram-control.ts: saldo, estado, cerrar, stop
+UI: src/app/page.tsx → src/components/wallet-live.tsx, polls /api/wallet every 15 s; Start/Stop/params/close via POST /api/wallet
 Auth: src/proxy.ts (HTTP Basic auth when BOT_PASSWORD is set; otherwise localhost only)
+
+Desktop (desktop/main.ts, Electron):
+  utilityProcess runs the Next standalone server on 127.0.0.1:<free port>
+  BrowserWindow shows it; closing hides to the tray, "Salir" stops the server
+  config: <userData>/config.env (from .env.example), log: <userData>/logs/server.log
+  wallet import: page → preload (window.pollo) → IPC "wallet:import" → importDedicatedWallet(); never over HTTP
 ```
-
-### Key invariant: the live bot equals the backtest
-
-`src/lib/bot/sleeve.ts` drives both the backtest (`backtest.ts`) and the live paper bot (`engine.onCandles`):
-
-- the decision is taken on bar *i*'s close;
-- the fill happens at bar *i+1*'s open;
-- the stop is checked against the bar's low, and a gap through the stop fills at the open.
-
-`engine.test.ts` asserts that feeding bars one by one gives exactly the backtest's trades. **Never break this.** If you change trading logic, change it in `sleeve.ts` / `strategies.ts` so both paths get it, and keep that test green.
 
 ## File map
 
 | Path | Role |
 |---|---|
-| `src/lib/bot/indicators.ts` | EMA, SMA, RSI, ATR, ADX, Donchian, MACD, session VWAP. Arrays are aligned to the input, NaN during warmup, and **never read future bars**. |
-| `src/lib/bot/strategies.ts` | `cruce` (EMA 20/50 above EMA 200, the one that validates), `regimen` (SMA 200), `tendencia` (Donchian), `retroceso` (RSI-2), `vwap`, `vwap9`. Long-only. |
-| `src/lib/bot/sleeve.ts` | One market's capital: risk-based sizing, fills, stops, fees and slippage. |
-| `src/lib/bot/backtest.ts` | `runBacktest`, metrics, `walkForward` (70/30), `judge` (pass/fail gate). |
-| `src/lib/bot/engine.ts` | Account state, live bar processing, halts, settings changes, log, alert flags, paper-fill queue. |
-| `src/lib/bot/settings.ts` | `BotSettings`, the Conservador/Agresivo profiles, clamping. |
-| `src/lib/bot/market.ts` | Markets, intervals, Binance and Coinbase candle fetch. |
-| `src/lib/bot/view.ts` | Everything the dashboard shows (the `BotView` type). |
-| `src/lib/bot/rotation.ts`, `universe.ts` | Momentum-rotation simulator (research only, rejected). |
-| `src/lib/exec/*` | Shadow mode: `tokens.ts` (mints), `jupiter.ts` (quote, no taker), `shadow.ts` (cost math), `runner.ts` (plan, run, apply). |
-| `src/lib/lp/*` | Meteora: `bidask.ts` (position value math), `meteora.ts` (API parsing, screen, forward test), `livebook.ts` (paper book). |
+| `src/lib/live-loop.ts` | The 15 s loop. Each kick guards its own reentry. |
 | `src/lib/exec/lp-plan.ts` | Meteora live decisions, pure: pool choice, size, exits on the on-chain mark. |
-| `src/lib/exec/lp-chain.ts` | Meteora live signing: open, close, sell, read position value. The only file that opens the key. |
-| `src/lib/exec/lp-runner.ts` | Meteora live pass: reconcile, mark, close, retry leftovers, open. |
-| `src/lib/exec/wallet.ts`, `intents.ts`, `live-book.ts` | Wallet files, live book (`bot.json`), intent journal. |
-| `src/lib/notify/telegram.ts` | Alert batching and sending. |
-| `src/lib/service.ts` | Orchestration, the state lock (`withState`), dashboard actions. |
-| `src/lib/store.ts`, `paths.ts` | Persistence. |
-| `src/proxy.ts` | Auth for every route. |
-| `src/components/desk.tsx`, `charts.tsx` | Dashboard, candlestick chart. |
-| `scripts/*.ts` | Research CLIs (backtest, rotation, meteora). |
-| `deploy/install.sh`, `deploy/GUIA-GOOGLE-CLOUD.md` | One-command VM install: Caddy HTTPS, systemd, Meteora timer. |
-| `docs/` | `GUIA-DE-USO.md` (owner's guide), `CORRER-EN-CASA.md`, `EJECUCION-REAL.md` (live design), `CLAUDE-CHANGES.md` (log of Claude commits; add an entry with each one). |
+| `src/lib/exec/lp-chain.ts` | Meteora live signing: open, close, sell, read position value. The only file that opens the key to sign. Loads the DLMM SDK through `load-dlmm.cjs` at a runtime path. |
+| `src/lib/exec/lp-runner.ts` | Meteora live pass. |
+| `src/lib/exec/wallet.ts` | Wallet files (create, import), live book (`bot.json`), status for the dashboard. |
+| `src/lib/exec/intents.ts`, `live-book.ts`, `live-params.ts`, `sell-rule.ts` | Intent journal, positions, parameters and presets, leftover-token sales. |
+| `src/lib/lp/*` | Meteora: `bidask.ts` (position math), `meteora.ts` (API parsing, screen, forward test), `datapi.ts`, `history.ts`. |
+| `src/lib/bot/market.ts` | SOL/USD price for the dashboard and Telegram. |
+| `src/lib/notify/telegram.ts` | Live alerts and owner commands. |
+| `src/components/wallet-live.tsx` | The dashboard (terminal theme). `wallet-import.tsx`, `logo.tsx`, `binary-rain.tsx`. |
+| `src/lib/logo-grid.ts` | The pixel-chicken grid. `src/app/icon.svg`, `public/logo.svg` and `desktop/*.png` are drawn from it. |
+| `desktop/main.ts`, `desktop/preload.ts` | Electron shell and its only bridge. |
+| `scripts/desktop.mjs`, `electron-builder.yml` | Desktop build. |
+| `.github/workflows/desktop.yml` | Builds the Windows NSIS installer on Windows and the Linux packages on Ubuntu. |
+| `deploy/install.sh`, `deploy/GUIA-GOOGLE-CLOUD.md` | One-command VM install: Caddy HTTPS, systemd, Meteora collector timer. |
+| `docs/` | `EJECUCION-REAL.md` (live design), `CLAUDE-CHANGES.md` (log of Claude commits; add an entry with each one). |
 
 ## Environment variables
 
-Use `.env.local` on a PC and `/etc/solana-bot.env` on the VM. The template is `.env.example`.
+Use `.env.local` for `npm run dev`, `/etc/solana-bot.env` on the VM, and `config.env` in the app data folder for the desktop app. The template is `.env.example`.
 
 | Variable | Effect |
 |---|---|
 | `BOT_PASSWORD`, `BOT_USER` | Basic auth. Without a password, only localhost is served. |
-| `LIVE_MODE=shadow` + `JUPITER_API_KEY` | Shadow quotes on Jupiter Swap API v2 (`/order`, no `taker`). |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Push alerts. |
-| `SOLANA_RPC_URL` | RPC used to read token decimals. Defaults to the public RPC. |
-| `PAPER_DATA_DIR` | Data folder. Defaults to `./data`. |
-| `WALLET_DIR` | Meteora live wallet folder. Defaults to `~/.solana-paper-bot`. Must be outside the repo. |
-| `LIVE_LP_MAX_SOL`, `LIVE_MIN_SOL_RESERVE` | Meteora live cap on open stake, and SOL that is never spent. |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Push alerts and owner commands. |
+| `SOLANA_RPC_URL` | RPC for live reads and sends. Defaults to the public RPC. |
+| `WALLET_DIR` | Wallet folder. Defaults to `~/.solana-paper-bot`. Must be outside the repo. |
+| `LIVE_LP_MAX_SOL`, `LIVE_MIN_SOL_RESERVE` | Cap on open stake, and SOL that is never spent. |
 | `LIVE_MAX_PRICE_IMPACT_BPS`, `LIVE_MAX_SLIPPAGE_BPS` | Impact and slippage limits for opens and leftover sales. |
 | `LIVE_PRIORITY_MICROLAMPORTS` | Priority fee per compute unit. Defaults to 20000. |
 | `LIVE_MAX_BIN_ARRAY_RENT_SOL` | Non-refundable bin-array rent an open may pay. Defaults to 0 (refuse). |
-| `BINANCE_DATA_URL`, `METEORA_API_URL`, `JUPITER_API_URL` | Endpoint overrides. |
+| `LIVE_MAX_POSITION_BINS` | Bins per position. 69 = standard positions only; 200 lets 0.8–1.25% pools take the full range. |
+| `METEORA_API_URL`, `BINANCE_DATA_URL` | Endpoint overrides (Meteora pools, SOL price). |
 
 ## Rules (do not break)
 
-1. **Honesty over hype.** Never claim profits the data does not show. Every new strategy must be backtested with real fees and slippage and walk-forward validated. If it fails, say so and record it in the README's "What was tested and rejected". These ideas already failed with real data, so do not reintroduce them as winners:
-   - VWAP/EMA scalping on 3m/15m;
-   - momentum rotation across Solana tokens;
-   - leveraged long/short perps;
-   - RSI(2) mean reversion.
-2. **No look-ahead.** Indicators and decisions may use closed bars only. The forming bar may only fill pending orders at its open and trigger stops.
-3. **Keep live and backtest identical.** See the invariant above.
-4. **No real-money code without the design.** Real execution must follow `docs/EJECUCION-REAL.md`:
-   - executor interface;
-   - hard limits in env, not editable from the web UI;
-   - an intent journal written before signing;
-   - reconciliation with on-chain balances;
-   - a `KILL` file;
-   - the staged rollout paper → shadow → micro → live.
-   Do not add signing to the shadow path, and never send a `taker` in shadow quotes.
-5. **Secrets.** Never commit keys, tokens, API keys or wallet files. `.env*` is gitignored except `.env.example`. Never log the Telegram token or put it in error messages.
-6. **The dashboard may only reduce risk** once real money exists: pause, close. Risk limits live server-side.
-7. **Fail closed.** On network or data errors, record the error on the market (`book.error`), keep running, and never open positions on bad data.
-8. **Tests with every change.** Add or extend tests next to the module (`*.test.ts`).
+1. **Honesty over hype.** Never claim profits the data does not show. Meteora paper results do not predict live ones (see below).
+2. **No real-money code without the design.** Live execution follows `docs/EJECUCION-REAL.md`: hard limits in env, not editable from the UI; an intent journal written before broadcast; reconciliation with on-chain balances; a `KILL` file.
+3. **Secrets.** Never commit keys, tokens, API keys or wallet files. `.env*` is gitignored except `.env.example`. Never log the Telegram token or a private key, and never put either in an error message.
+4. **The private key never travels over HTTP.** It is imported from the CLI hidden prompt or through the desktop IPC bridge. Do not add an API route that accepts a key. Never overwrite an existing wallet.
+5. **The dashboard may only reduce risk**, except Start: pause, close, stop. Risk limits live server-side.
+6. **Fail closed.** On network or data errors, record the error, keep running, and never open positions on bad data.
+7. **Tests with every change.** Add or extend tests next to the module (`*.test.ts`).
 
 ## Known facts and gotchas
 
-- **Validation:** auto mode currently picks `cruce` on SOL, BTC, ETH, JUP and WIF on 4h candles. The portfolio backtest (Apr 2024 – Oct 2026) gave ~10%/yr at 2% risk and ~20%/yr at 5% risk, with a max drawdown of 5–7%. Buy & hold lost 45% over the same window.
-- **Shadow mode:**
-  - The token mints in `exec/tokens.ts` are not yet verified live, especially BTC (cbBTC) and ETH (Wormhole WETH).
-  - A quote more than 20% off Binance is flagged `suspicious`, which points to a wrong mint.
-  - Jupiter v2 field names (`inAmount`, `outAmount`, `priceImpactPct`) were taken from public docs and are parsed defensively.
-- **Meteora:** parsing follows the documented `GET /pair/all`. The collector runs as a separate, memory-capped systemd timer so it can never take the bot down.
-- **Meteora paper vs live:** they are not the same model, so paper results do not predict live ones.
-  - The paper book charges the pool's fees/TVL on 1 SOL while price is inside the range. Bid-Ask puts most SOL in the lowest bins, so that likely overstates fees.
-  - Paper ignores rent, exit impact and failed sends.
-  - Live uses the real on-chain value.
+- **Meteora paper vs live:** the `npm run meteora -- report` forward test charges the pool's fees/TVL on 1 SOL while price is inside the range. Bid-Ask puts most SOL in the lowest bins, so that likely overstates fees. It also ignores rent, exit impact and failed sends. Live uses the real on-chain value.
 - **Meteora live costs:**
   - A position locks ~0.057 SOL of rent, returned on close.
   - Each new bin array costs ~0.0714 SOL that never comes back. Opens that need one are refused unless `LIVE_MAX_BIN_ARRAY_RENT_SOL` allows it.
-- **Meteora live, 1% bin pools:** they never open. A 75% range needs 137 bins and one position holds 69.
+- **DLMM loading:** `lp-chain.ts` requires `src/lib/exec/load-dlmm.cjs` from `process.cwd()` so Next does not bundle the SDK's broken ESM build. Next cannot trace it, so `scripts/desktop.mjs` traces it with nft and copies it into the standalone server. Keep both in step.
+- **Desktop on Linux:** Ubuntu 24.04+ blocks Chromium's sandbox for AppImages through AppArmor. The `.deb` ships an AppArmor profile; for local tests run the unpacked app with `--no-sandbox`.
+- **Windows build from Linux** needs Wine for NSIS and the exe icon. Without it, build `--win zip -c.win.signAndEditExecutable=false`, or use the GitHub workflow.
 - **Network blocks:** the owner's work network blocks Jupiter and Meteora. Test those features from home or the VM.
 - **Platform:** `npm run dev` must work on Windows, so do not use `VAR=value cmd` syntax in package.json scripts.
 - **Next.js 16:** middleware is now `src/proxy.ts`. Read `node_modules/next/dist/docs/` for the current APIs instead of relying on older Next.js knowledge.

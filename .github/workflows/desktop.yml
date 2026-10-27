@@ -1,0 +1,37 @@
+# Desktop installers. Run it from the Actions tab ("Run workflow") or push a tag like v0.1.0.
+# Windows builds on Windows so the .exe gets its icon and a real NSIS installer (no Wine needed).
+name: desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run desktop -- ${{ matrix.target }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PolloTraderBot-${{ runner.os }}
+          path: |
+            dist-desktop/release/*.exe
+            dist-desktop/release/*.AppImage
+            dist-desktop/release/*.deb
+          if-no-files-found: error

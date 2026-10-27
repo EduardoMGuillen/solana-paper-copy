@@ -47,3 +47,6 @@ next-env.d.ts
 # dedicated wallet — never commit the key or its address file
 wallet.json
 wallet.address
+
+# desktop build output
+/dist-desktop

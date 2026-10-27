@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
+import { WalletImport } from "@/components/wallet-import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LivePosition } from "@/lib/exec/live-book";
@@ -101,6 +102,8 @@ export function WalletLive() {
     setDirty(value);
   }
 
+  const [reload, setReload] = useState(0);
+
   useEffect(() => {
     let stop = false;
     async function load() {
@@ -124,7 +127,7 @@ export function WalletLive() {
       stop = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [reload]);
 
   async function post(body: { running?: boolean; params?: LiveParams; close?: string }) {
     setBusy(true);
@@ -245,11 +248,17 @@ export function WalletLive() {
           ))}
           {status ? (
             <p className="num text-xs text-muted-foreground">
-              mode={status.limits.liveMode} · firma={status.signing ? "sí" : "no"} · tope={sol(status.limits.lpMaxSol)} · reserva={sol(status.limits.minReserveSol)} · journal={status.journal}
+              firma={status.signing ? "sí" : "no"} · tope={sol(status.limits.lpMaxSol)} · reserva={sol(status.limits.minReserveSol)} · journal={status.journal}
             </p>
           ) : null}
         </div>
       </Panel>
+
+      {status && !status.address ? (
+        <Panel title="wallet.import">
+          <WalletImport onImported={() => setReload((n) => n + 1)} />
+        </Panel>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric k="total" v={totalSol == null ? "—" : sol(totalSol)} hint={totalSol == null || price == null ? "Wallet, liquidez y alquiler" : money(totalSol * price)} />

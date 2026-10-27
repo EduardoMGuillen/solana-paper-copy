@@ -1,0 +1,35 @@
+appId: app.pollotraderbot.desktop
+productName: PolloTraderBot
+electronVersion: 45.0.0
+directories:
+  app: dist-desktop/app
+  output: dist-desktop/release
+  buildResources: desktop
+asar: true
+extraResources:
+  - from: .next/standalone
+    to: server
+  # electron-builder filters node_modules out of the entry above; ship it on its own.
+  - from: .next/standalone/node_modules
+    to: server/node_modules
+  - from: desktop/icon.png
+    to: icon.png
+  - from: desktop/tray.png
+    to: tray.png
+  - from: .env.example
+    to: config.env.example
+win:
+  target: nsis
+  icon: desktop/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: PolloTraderBot
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: desktop/icon.png
+  category: Finance
+  synopsis: Bot de liquidez Meteora DLMM en Solana

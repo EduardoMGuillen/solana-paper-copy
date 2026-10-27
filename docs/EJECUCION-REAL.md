@@ -1,5 +1,7 @@
 # Diseño: ejecución real
 
+> **Nota (2026-10-26):** PolloTraderBot ya solo tiene Meteora live. Las partes de este diseño sobre el bot de tendencia, el papel, el backtest y el modo sombra son historia: ese código se quitó en `67066c8`. Las reglas de ejecución real (límites en env, journal, reconciliación, `KILL`) siguen vigentes.
+
 Estado: **diseño, no implementado.** Hoy el bot solo opera en papel. Este documento define cómo pasar a dinero real sin cambiar la lógica que ya está validada.
 
 Los puntos marcados **[verificar]** no se pudieron confirmar porque la red de desarrollo bloquea los dominios de Jupiter y Meteora. Hay que confirmarlos en la VM o en una red personal antes de escribir el código.

@@ -1,133 +1,77 @@
-# Bot de estrategia Solana (papel)
+# PolloTraderBot
 
-> **Empieza aquí**
-> - **Cómo funciona y cómo usarlo:** [docs/GUIA-DE-USO.md](docs/GUIA-DE-USO.md)
-> - **Correrlo en tu PC (modo sombra + Meteora):** [docs/CORRER-EN-CASA.md](docs/CORRER-EN-CASA.md)
-> - **Desplegarlo 24/7 en Google Cloud u Oracle:** [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md)
-> - **Diseño del paso a dinero real:** [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md)
-> - **Para asistentes de IA (Grok, etc.):** [AGENTS.md](AGENTS.md). Dáselo antes de pedir cambios.
->
-> Inicio rápido: `npm install` → `npm run dev` → http://127.0.0.1:47231 · Tests: `npm test`
+Bot de liquidez para **Meteora DLMM** en Solana, con interfaz de terminal verde y app de escritorio para Windows y Linux.
 
-Trading bot driven by technical analysis on real market data. It trades SOL and liquid Solana-ecosystem tokens (plus BTC/ETH) on **paper**, with the exact same bar-by-bar logic as its backtester, so the paper record is directly comparable to the backtest. It never signs or sends a transaction and never asks for a private key.
+Pone SOL en pools Bid-Ask, por debajo del precio, y cierra cada posición al llegar a la toma de ganancia, al stop o al tiempo máximo. Lee el valor de la posición en la cadena, comisiones incluidas, nunca de un modelo.
 
-## Why it changed from the copy desk
+> **Mueve dinero real.** Con Start, el bot firma transacciones con tu wallet dedicada. Úsala solo para el bot y pon en ella solo lo que estés dispuesto a perder. Los límites duros (`LIVE_LP_MAX_SOL`, `LIVE_MIN_SOL_RESERVE`, el archivo `KILL`) viven en la configuración y la interfaz no los puede cambiar. El diseño completo está en [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md).
 
-The previous version was a copy-trading demo. Its profits were not real signals:
+## App de escritorio
 
-- The "Lumen" leader made money because the AURA price was hard-coded to rise 2.2% every tick (`demo.ts`). Fosa lost because DUNA/ECO were hard-coded to fall 4.5%.
-- The "Meteora top 7" were **stakers ranked by stake size**, not profitable traders.
-- Wallet copying polled a public RPC every ~25 s with a 20 s staleness filter, so on fast tokens most real signals would arrive too late to copy.
+### Instalar
 
-The bot now trades its own signals, and only on strategies that pass an out-of-sample test on the market they trade.
-
-## Strategies
-
-All long-only (spot, so it can go live through Jupiter later). Each decides on a **closed** candle and fills at the next candle's open. No look-ahead.
-
-| Id | Method | Evidence |
+| Sistema | Archivo | Notas |
 |---|---|---|
-| `cruce` | EMA 20/50 crossover above the EMA 200, 3-ATR trailing stop | Trend following / time-series momentum (Moskowitz, Ooi & Pedersen 2012; the most documented edge in crypto) |
-| `regimen` | Hold while the close is above the SMA 200 and the EMA 50 confirms; 5-ATR catastrophe stop | Faber's trend filter (2007): keeps most of the bull market, avoids most crashes |
-| `tendencia` | 20-bar Donchian breakout with ADX > 20, chandelier exit | Turtle breakout |
-| `retroceso` | Connors RSI(2) pullback above the SMA 200 | Works in equities. **Loses in crypto** in our tests; kept as a control |
+| Windows | `PolloTraderBot Setup x.y.z.exe` | Lo genera el workflow `desktop` de GitHub Actions (Actions → desktop → Run workflow). |
+| Windows (portable) | `PolloTraderBot-x.y.z-win.zip` | Descomprime y abre `PolloTraderBot.exe`. Se puede generar desde Linux, pero sale con el ícono genérico de Electron. |
+| Linux (Ubuntu/Debian) | `pollotraderbot_x.y.z_amd64.deb` | **Recomendado en Linux.** `sudo apt install ./pollotraderbot_*.deb`. Configura el sandbox de Chromium. |
+| Linux (otras) | `PolloTraderBot-x.y.z.AppImage` | En Ubuntu 24.04 o más nuevo, AppArmor bloquea el sandbox de los AppImage: usa el `.deb` o ábrelo con `--no-sandbox`. |
 
-### Automatic mode (default)
+### Primer uso
 
-Every 24 h, for each market, the bot downloads about 6,000 candles and runs a **walk-forward** for all four strategies: 70% in-sample, 30% out-of-sample. A strategy qualifies only if all of these hold:
+1. Abre PolloTraderBot. Como todavía no hay wallet, aparece el panel `wallet.import`.
+2. Pega la **clave privada** de la wallet que usas para el bot (Phantom → Exportar clave privada, o el arreglo de `solana-keygen`). La dirección pública es opcional, pero sirve para comprobar que pegaste la correcta.
+   - La clave va del formulario al proceso principal de la app, nunca por HTTP, y se guarda en `~/.solana-paper-bot/wallet.json` (en Windows, `C:\Users\<tú>\.solana-paper-bot`) con permisos de solo dueño.
+   - El bot nunca reemplaza una wallet que ya existe, porque podría tener fondos o posiciones. Para cambiarla, mueve esa carpeta a mano.
+3. Revisa los parámetros (`config` → `[mostrar]`) y pulsa **START**.
 
-- at least 20 trades
-- profit factor ≥ 1.2
-- positive out-of-sample return
-- max drawdown ≤ 25%
-- expectancy > 0.1 R
+### Ventana, bandeja y configuración
 
-The bot then picks, among the strategies that qualify, the one with the best **in-sample** Sharpe. The out-of-sample block stays a check, not a selector. If no strategy qualifies, the bot does not trade that market. An open trade is never abandoned to switch strategies.
+- **Cerrar la ventana no detiene el bot.** La app queda en la bandeja del sistema, junto al reloj, y sigue vigilando las posiciones abiertas. Para apagarla del todo usa bandeja → **Salir (detiene el bot)**.
+- **Configuración:** bandeja → *Abrir configuración* abre la carpeta de datos. Ahí está `config.env`, con Telegram, RPC propio y los límites `LIVE_*`; la plantilla es [.env.example](.env.example). Después de cambiarlo, sal y vuelve a abrir la app.
+- **Log del servidor:** `logs/server.log`, en esa misma carpeta.
 
-### Risk management
+### Generar los instaladores
 
-- **Risk-based sizing**: position = (sleeve equity × risk %) ÷ (entry − stop). If the initial stop is hit, you lose about the risk % of that market's capital (2% by default).
-- No leverage (max exposure 100% per market). Capital is split evenly across markets.
-- Fee and slippage are charged on every fill, in both the backtest and paper trading (10 + 10 bps per side).
-- **Daily loss halt** (5%): no new entries until the next UTC day.
-- **Drawdown halt** (20% from the account peak): no new entries until you resume by hand.
-- Live stop: inside the current candle, the stop fires on the last price.
+```bash
+npm run desktop -- --linux    # AppImage + .deb
+npm run desktop -- --win      # instalador NSIS (en Windows, o en Linux con Wine)
+npm run desktop -- --win zip -c.win.signAndEditExecutable=false   # Windows portable desde Linux sin Wine
+npm run desktop:dev           # solo la carpeta sin empaquetar, para probar
+```
 
-## Backtest results (real data, Oct 2026)
+Todo sale en `dist-desktop/release/`. El script [scripts/desktop.mjs](scripts/desktop.mjs):
 
-`npm run backtest -- 4h 9000 0.01 cruce,regimen` (4 h candles, ~4 years, 1% risk):
+1. compila Next en modo standalone;
+2. agrega el SDK de Meteora, que se carga en tiempo de ejecución y Next no rastrea;
+3. empaqueta `desktop/main.ts` y `desktop/preload.ts` con esbuild;
+4. llama a electron-builder.
 
-| Market | Strategy | Trades | PF | Return | OOS | Max DD | Buy & hold |
-|---|---|---|---|---|---|---|---|
-| SOL | cruce | 47 | 2.76 | +20.9% | +11.5% | 3.7% | +250% |
-| SOL | regimen | 90 | 4.01 | +65.6% | +3.9% | 14.5% | +248% |
-| BTC | cruce | 42 | 2.02 | +14.5% | +6.0% | 7.9% | +330% |
-| ETH | cruce | 44 | 1.65 | +10.8% | +11.9% | 4.9% | +88% |
-| JUP | cruce | 28 | 1.58 | +5.4% | +5.1% | 3.1% | −49% |
-| WIF | cruce | 20 | 2.49 | +9.9% | +8.1% | 3.6% | −95% |
+Los íconos salen del logo con `npm run icons`.
 
-Returns scale roughly with the risk setting. At 3% risk, SOL `cruce` returned +68% with an 11% drawdown.
+## Desarrollo
 
-**Read these numbers honestly:**
-
-- In a strong bull market, **buy & hold beats trend following**. The edge is risk-adjusted: much smaller drawdowns, and it sits out crashes (JUP −49%, WIF −95%).
-- The returns are modest. Nothing here is a "passive income machine". Treat any strategy that promises more with suspicion.
-- Past results do not guarantee future results. Four years is only a few market cycles.
-
-## Profiles and the 1 SOL test
-
-The paper account starts with **1 SOL** (change it under settings; applies on reset), valued at the SOL price at creation. The dashboard reports equity in USD and in SOL, and against **just holding the starting SOL**. If the bot cannot beat that, it is not worth running.
-
-| Profile | Risk per trade | Halts | Portfolio backtest (Apr 2024 – Oct 2026) |
-|---|---|---|---|
-| Conservador | 2% | daily 5%, drawdown 20% | ~10%/yr, max drawdown ~5% |
-| **Agresivo** (default) | 5% | daily 8%, drawdown 30% | ~20%/yr, max drawdown ~7% |
-
-In the same window, buying and holding the same 5 tokens lost 45%. Expect live results around half the backtest return and up to twice its drawdown.
-
-## What was tested and rejected
-
-These ideas were backtested on real data with real costs and **did not survive**. They stay in the repo as research tools.
-
-| Idea | Result |
-|---|---|
-| VWAP + EMA 9 (and EMA 9/20) scalping on 3m / 15m | Loses on every market even at 0.03% cost per side (best case on Solana). The stop is ~0.2% away, so fees eat a third to half of the risk on every trade. `npm run backtest -- 3m 34000 0.01 vwap9 3 3` |
-| Momentum rotation across 21 Solana tokens (daily) | +75–83%/yr in 2022–2024 (meme boom), median **−67%** out of sample in 2025–2026 across 216 parameter sets. `npm run rotation` |
-| Long/short trend following with 2–5x leverage (perps) | Shorts and perp funding make it worse than spot long-only; BTC at 5x lost 24% with a 72% drawdown out of sample |
-| RSI(2) mean reversion | Profit factor < 1 on almost every market |
-
-## Run
+Requiere **Node 22** o más nuevo.
 
 ```bash
 npm install
-npm run dev        # http://127.0.0.1:47231
-npm test           # unit tests, including live/backtest parity
-npm run backtest   # every strategy × every market; args: interval bars risk strategies
+npm run dev            # panel en http://127.0.0.1:47231
+npm test               # vitest
+npx tsc --noEmit -p .  # tipos
+npm run lint
+npm run build
+
+npm run wallet                       # crea una wallet dedicada nueva (solo imprime la dirección)
+npm run wallet -- import [DIRECCION] # importa tu clave; se escribe oculta en la terminal
+npm run meteora -- scan | collect | report   # investigación de pools Meteora
 ```
 
-The bot runs inside the server process (every 15 s) whether or not a browser is open. Positions persist in `data/bot-state.json` across restarts. Market data comes from Binance's public mirror (`data-api.binance.vision`, no key), with Coinbase as a fallback for SOL, BTC and ETH. Override the mirror with `BINANCE_DATA_URL`.
+En el navegador, el panel `wallet.import` solo muestra el comando `npm run wallet -- import`. El formulario para pegar la clave existe únicamente en la app de escritorio.
 
-## Deploy 24/7 (Google Cloud or Oracle)
+### Servidor 24/7
 
-See [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). One command (`sudo bash deploy/install.sh`) installs the bot on a Debian/Ubuntu VM with HTTPS (Caddy + sslip.io), a random password, and a hardened systemd service.
+Para correrlo en una VM con HTTPS y contraseña, sigue [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). La VM usa `next start`, no la app de escritorio.
 
-The whole app (dashboard and API) is behind HTTP Basic auth when `BOT_PASSWORD` is set. Without it, the app answers on localhost only.
+## Historia
 
-## Shadow mode (real Jupiter costs, no signing)
-
-With `LIVE_MODE=shadow` and `JUPITER_API_KEY` set, every paper fill and an hourly probe per market are quoted on Jupiter Swap API v2 **without a taker**, so no transaction is ever returned to sign. The dashboard compares the real cost per side with the backtest's assumption. Running it at home: [docs/CORRER-EN-CASA.md](docs/CORRER-EN-CASA.md). Template: `.env.example`.
-
-## Telegram alerts
-
-Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (on the VM: `/etc/solana-bot.env`). The bot then sends buys, sells, risk halts, strategy changes, data-feed outages and a daily summary, batched once per tick. Setup steps are in the deploy guide.
-
-## Going live (designed, not implemented)
-
-The full design is in [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md): an executor interface (paper → shadow → live), Jupiter Swap API v2, Meteora DLMM positions, key handling, hard limits outside the dashboard, reconciliation and staged rollout. Summary:
-
-Before risking money:
-
-1. Run the bot on paper for **at least 4–8 weeks** and check that its trades and slippage match the backtest.
-2. Execute through Jupiter (`/swap` API) with a **dedicated hot wallet** holding only the trading capital. Never use your main wallet.
-3. Add order confirmation, retries, a priority-fee cap, and a check of the actual fill price against the expected price.
-4. Start with an amount you can afford to lose entirely.
+Antes de llamarse PolloTraderBot, este repo era un bot de análisis técnico en papel, con un libro de papel de Meteora y modo sombra con Jupiter. Esas partes se quitaron en el commit `67066c8`. Sus backtests, resultados y las ideas rechazadas siguen en el historial de git.
