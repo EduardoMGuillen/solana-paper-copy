@@ -6,6 +6,39 @@ Agrega una entrada cada vez que Claude haga un commit.
 
 ---
 
+## 2026-10-26 · `3f167c1` · App de escritorio para Windows y Linux
+
+**Qué cambió:**
+- PolloTraderBot corre como app de escritorio con Electron. El servidor de Next arranca adentro, solo en `127.0.0.1`, y se ve en una ventana nativa con el logo.
+- Cerrar la ventana la manda a la bandeja y el bot sigue vigilando posiciones. "Salir" en la bandeja lo detiene. Si el servidor se cae, se reinicia solo.
+- La configuración está en `config.env`, en la carpeta de datos (bandeja → Abrir configuración). El log está en `logs/server.log`.
+- Sin wallet, el panel muestra `wallet.import`. En la app, la clave va por IPC al proceso principal, nunca por HTTP. En el navegador solo muestra el comando de terminal.
+- `npm run desktop` genera el instalador NSIS (.exe), el AppImage y el .deb. El workflow `desktop` de GitHub compila el .exe en Windows.
+
+**Por qué:**
+- El dueño pidió un ejecutable en lugar de la web en localhost, y conectar su wallet sin pasos de terminal.
+
+## 2026-10-26 · `605d398` · Importar una wallet existente
+
+**Qué cambió:**
+- `npm run wallet -- import [DIRECCION]` pide la clave oculta: base58 de Phantom o el arreglo de `solana-keygen`.
+- La clave se valida (la mitad pública debe salir de la semilla y coincidir con la dirección, si se indica) y se guarda igual que una generada, con permisos 600.
+- Nunca reemplaza una wallet distinta, y los errores nunca repiten la clave.
+
+**Por qué:**
+- El dueño ya tiene una wallet para el bot.
+
+## 2026-10-26 · `67066c8` · PolloTraderBot: solo Meteora live, interfaz de terminal
+
+**Qué cambió:**
+- Se quitaron Estrategia (bot de tendencia en papel), Meteora papel y el modo sombra, con sus motores, APIs, scripts y tests. Siguen en el historial de git.
+- Meteora live tiene su propio ciclo de 15 s (`src/lib/live-loop.ts`). Antes dependía del ciclo del papel.
+- El panel live está en `/`, y `/meteora-live` redirige ahí.
+- Tema verde sobre negro: Fira Code incluida en el proyecto, scanlines, lluvia de 0/1 (se apaga con movimiento reducido) y un logo de pollo en pixel art. Pérdidas y botones peligrosos en rojo.
+
+**Por qué:**
+- El dueño quiere una sola herramienta enfocada en Meteora live, con otra identidad.
+
 ## 2026-10-21 · `bc3c370` · Meteora live: cerrar cuando el precio se aleja hacia arriba
 
 **Qué cambió:**
