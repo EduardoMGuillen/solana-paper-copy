@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LivePosition } from "@/lib/exec/live-book";
 import { LIVE_PRESETS, sameLiveParams, type LiveParams } from "@/lib/exec/live-params";
-import type { PortfolioRow, WalletStatus } from "@/lib/exec/wallet";
+import type { ClosedPosition, PortfolioRow, WalletStatus } from "@/lib/exec/wallet";
 
 type FormState = {
   slotPct: string;
@@ -20,6 +20,7 @@ type FormState = {
   holdHours: string;
   rangePct: string;
   binStepPct: string;
+  minAgeDays: string;
 };
 
 function plain(value: number, digits = 2): string {
@@ -38,6 +39,7 @@ function formFrom(params: LiveParams): FormState {
     holdHours: plain(params.holdHours, 0),
     rangePct: plain(params.range * 100),
     binStepPct: plain(params.binStep * 100, 2),
+    minAgeDays: plain(params.minAgeDays, 0),
   };
 }
 
@@ -56,7 +58,8 @@ function payloadFrom(form: FormState): LiveParams | null {
   const holdHours = readNumber(form.holdHours);
   const range = readNumber(form.rangePct);
   const binStep = readNumber(form.binStepPct);
-  const numbers = [slot, minTvl, minFees24h, minBaseFeePct, minVolume1h, takeProfit, stopLoss, holdHours, range, binStep];
+  const minAgeDays = readNumber(form.minAgeDays);
+  const numbers = [slot, minTvl, minFees24h, minBaseFeePct, minVolume1h, takeProfit, stopLoss, holdHours, range, binStep, minAgeDays];
   if (numbers.some((value) => !Number.isFinite(value))) return null;
   return {
     slot: slot / 100,
@@ -69,6 +72,7 @@ function payloadFrom(form: FormState): LiveParams | null {
     holdHours,
     range: range / 100,
     binStep: binStep / 100,
+    minAgeDays,
   };
 }
 
@@ -332,6 +336,8 @@ export function WalletLive() {
         </div>
       </Panel>
 
+      <HistoryPanel history={status?.history ?? []} solUsd={price} />
+
       <Panel
         title="config"
         right={
@@ -403,6 +409,7 @@ export function WalletLive() {
                     <Field label="Comisiones 24 h" suffix="US$" value={form.minFees24h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minFees24h", value)} hint="Lo que el pool cobró en un día." />
                     <Field label="Comisión base" suffix="%" value={form.minBaseFeePct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minBaseFeePct", value)} hint="Fee del pool." />
                     <Field label="Volumen 1 h" suffix="US$" value={form.minVolume1h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minVolume1h", value)} hint="Operación reciente del pool." />
+                    <Field label="Antigüedad mínima" suffix="días" value={form.minAgeDays} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minAgeDays", value)} hint="Evita pools recién creados. 0 = cualquiera." />
                   </Group>
                   <Group title="salida_y_rango">
                     <Field label="Toma de ganancia" suffix="%" value={form.takeProfitPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "takeProfitPct", value)} hint="Cierra la posición al llegar aquí." />
@@ -505,6 +512,94 @@ function PositionRow({ position, holding, solUsd, busy, onClose }: { position: L
         </Button>
       </td>
     </tr>
+  );
+}
+
+const REASON: Record<string, string> = {
+  "take-profit": "toma",
+  loss: "stop",
+  time: "tiempo",
+  rug: "caída brusca",
+  gone: "ya no estaba",
+  stop: "STOP",
+  manual: "manual",
+  above: "reabrir (regla antigua)",
+};
+
+function duration(ms: number): string {
+  const hours = Math.max(0, ms / 3_600_000);
+  return hours < 1 ? `${Math.round(hours * 60)} min` : `${hours.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h`;
+}
+
+/** Closed positions with the result of the last on-chain read before each close. */
+function HistoryPanel({ history, solUsd }: { history: ClosedPosition[]; solUsd: number | null }) {
+  const known = history.filter((row) => row.resultSol != null);
+  const total = known.reduce((sum, row) => sum + (row.resultSol ?? 0), 0);
+  const wins = known.filter((row) => (row.resultSol ?? 0) > 0).length;
+  const tone = total > 0 ? "gain glow" : total < 0 ? "loss glow-red" : "";
+  const rows = [...history].reverse().slice(0, 50);
+  return (
+    <Panel title="history" right={`${history.length} cerradas`}>
+      <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-3">
+        <div className="bg-black px-3 py-2">
+          <p className="text-[11px] tracking-widest text-muted-foreground">&gt; resultado_total</p>
+          <p className={`num mt-1 text-lg font-semibold ${tone}`}>{known.length ? signedSol(total) : "—"}</p>
+          <p className="text-xs text-muted-foreground">{known.length && solUsd != null ? signedMoney(total * solUsd) : "Sin cierres con lectura"}</p>
+        </div>
+        <div className="bg-black px-3 py-2">
+          <p className="text-[11px] tracking-widest text-muted-foreground">&gt; ganadoras</p>
+          <p className="num mt-1 text-lg font-semibold">{known.length ? `${wins} / ${known.length}` : "—"}</p>
+          <p className="text-xs text-muted-foreground">{known.length ? `${Math.round((wins / known.length) * 100)}% de las cerradas` : "—"}</p>
+        </div>
+        <div className="col-span-2 bg-black px-3 py-2 sm:col-span-1">
+          <p className="text-[11px] tracking-widest text-muted-foreground">&gt; cómo se mide</p>
+          <p className="mt-1 text-xs text-muted-foreground">Última lectura en la cadena antes de cerrar, con comisiones. No incluye el alquiler (vuelve al cerrar) ni el costo de vender el token sobrante.</p>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-3 py-6 text-center text-sm text-muted-foreground">-- todavía no hay posiciones cerradas --</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="num w-full min-w-[760px] text-left text-sm">
+            <thead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+              <tr className="border-b border-border">
+                <th className="px-3 py-2 font-medium">Pool</th>
+                <th className="px-3 py-2 font-medium">Tamaño</th>
+                <th className="px-3 py-2 font-medium">Resultado</th>
+                <th className="px-3 py-2 font-medium">Motivo</th>
+                <th className="px-3 py-2 font-medium">Duró</th>
+                <th className="px-3 py-2 font-medium">Cerrada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const rowTone = row.resultSol == null ? "" : row.resultSol > 0 ? "gain" : row.resultSol < 0 ? "loss" : "";
+                return (
+                  <tr key={`${row.pool}-${row.closedAt}`} className="border-b border-border/60">
+                    <td className="px-3 py-2 font-semibold">{row.name}</td>
+                    <td className="px-3 py-2">{sol(row.stakeSol)}</td>
+                    <td className={`px-3 py-2 ${rowTone}`}>
+                      {row.resultSol == null ? "—" : `${pct(row.positionPct)} · ${signedSol(row.resultSol)}`}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">{REASON[row.reason] ?? row.reason}</td>
+                    <td className="px-3 py-2">{duration(row.closedAt - row.openedAt)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {row.signature ? (
+                        <a className="hover:underline" href={`https://solscan.io/tx/${row.signature}`} target="_blank" rel="noreferrer">
+                          {new Date(row.closedAt).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })} ↗
+                        </a>
+                      ) : (
+                        new Date(row.closedAt).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 

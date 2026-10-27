@@ -13,7 +13,10 @@ import {
   parseLamports,
   portfolioView,
   closeLivePosition,
+  readLiveFile,
   readLiveRunning,
+  writeLiveFile,
+  MAX_HISTORY,
   readWalletAddress,
   saveLiveParams,
   setLiveBot,
@@ -48,6 +51,20 @@ describe("wallet address", () => {
 
   it("rejects a symbol that is not base58", () => {
     expect(() => decodeBase58("0OIl")).toThrow(/inválida/);
+  });
+});
+
+describe("closed-position history", () => {
+  it("keeps valid rows, drops broken ones, and caps the list with the newest last", () => {
+    const dir = tempDir();
+    createDedicatedWallet(dir);
+    const row = (i: number) => ({ pool: WSOL, name: `T${i}-SOL`, stakeSol: 0.1, openedAt: i, closedAt: i + 1, reason: "time", positionPct: -0.01, resultSol: -0.001, signature: null });
+    const rows = [{ name: "broken" }, ...Array.from({ length: MAX_HISTORY + 5 }, (_, i) => row(i + 1))];
+    writeLiveFile(dir, { ...readLiveFile(dir), history: rows as never });
+    const history = readLiveFile(dir).history;
+    expect(history).toHaveLength(MAX_HISTORY);
+    expect(history.at(-1)?.name).toBe(`T${MAX_HISTORY + 5}-SOL`);
+    expect(history[0]).toEqual(row(6));
   });
 });
 
@@ -227,6 +244,7 @@ describe("live window status", () => {
       holdHours: DECODER_EXITS.holdHours,
       range: DECODER_SHAPE.range,
       binStep: DECODER_SHAPE.binStep,
+      minAgeDays: 0,
     });
     const dir = tempDir();
     createDedicatedWallet(dir);
@@ -286,6 +304,7 @@ describe("live window status", () => {
       running: false,
       params: { ...PAPER_LIVE_PARAMS },
       positions: [],
+      history: [],
       notice: null,
       reason: "",
       kill: false,

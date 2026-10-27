@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { closeAllPositions, closeOnePosition, parseLivePosition, type LivePosition } from "./live-book";
-import { clampLiveParams, PAPER_LIVE_PARAMS, type LiveParams } from "./live-params";
+import { clampLiveParams, DEFAULT_LIVE_PARAMS, type LiveParams } from "./live-params";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -54,10 +54,11 @@ export type WalletStatus = {
   lamports: number | null;
   /** True only while this window is running and there is no KILL file. */
   signing: boolean;
-  /** Meteora live only. Paper books ignore this. */
   running: boolean;
   params: LiveParams;
   positions: LivePosition[];
+  /** Closed positions, newest last. */
+  history: ClosedPosition[];
   /** What the last Start or Stop did. */
   notice: string | null;
   reason: string;
@@ -348,7 +349,52 @@ type StoredBot = {
   digestAt?: unknown;
   skipped?: unknown;
   leftovers?: unknown;
+  history?: unknown;
 };
+
+/**
+ * One closed position. `positionPct` is the last on-chain read before the close, fees
+ * included: the same number the exits decide on. Rent comes back on close and is not in it.
+ */
+export type ClosedPosition = {
+  pool: string;
+  name: string;
+  stakeSol: number;
+  openedAt: number;
+  closedAt: number;
+  reason: string;
+  positionPct: number | null;
+  resultSol: number | null;
+  signature: string | null;
+};
+
+/** Closed positions kept in bot.json, newest last. */
+export const MAX_HISTORY = 200;
+
+function parseHistory(raw: unknown): ClosedPosition[] {
+  if (!Array.isArray(raw)) return [];
+  const rows = raw.flatMap((row): ClosedPosition[] => {
+    if (!row || typeof row !== "object") return [];
+    const item = row as Record<string, unknown>;
+    const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+    const stakeSol = num(item.stakeSol);
+    const openedAt = num(item.openedAt);
+    const closedAt = num(item.closedAt);
+    if (typeof item.pool !== "string" || typeof item.name !== "string" || !(stakeSol && stakeSol > 0) || !openedAt || !closedAt) return [];
+    return [{
+      pool: item.pool,
+      name: item.name,
+      stakeSol,
+      openedAt,
+      closedAt,
+      reason: typeof item.reason === "string" ? item.reason : "",
+      positionPct: num(item.positionPct),
+      resultSol: num(item.resultSol),
+      signature: typeof item.signature === "string" ? item.signature : null,
+    }];
+  });
+  return rows.slice(-MAX_HISTORY);
+}
 
 /** Token left in the wallet by a close whose sale back to SOL did not go through. */
 export type Leftover = { pool: string; name: string; tokenMint: string; solIsY: boolean; since: number; triedAt: number };
@@ -362,10 +408,11 @@ export type LiveFile = {
   /** Pool address → time until which it may not be opened again. */
   skipped: Record<string, number>;
   leftovers: Leftover[];
+  history: ClosedPosition[];
 };
 
 function emptyBot(): LiveFile {
-  return { running: false, params: { ...PAPER_LIVE_PARAMS }, positions: [], notice: null, digestAt: null, skipped: {}, leftovers: [] };
+  return { running: false, params: { ...DEFAULT_LIVE_PARAMS }, positions: [], notice: null, digestAt: null, skipped: {}, leftovers: [], history: [] };
 }
 
 function parseSkipped(raw: unknown): Record<string, number> {
@@ -424,6 +471,7 @@ export function readLiveFile(dir: string): LiveFile {
       digestAt: typeof parsed.digestAt === "number" && parsed.digestAt > 0 ? parsed.digestAt : null,
       skipped: parseSkipped(parsed.skipped),
       leftovers: parseLeftovers(parsed.leftovers),
+      history: parseHistory(parsed.history),
     };
   } catch {
     return emptyBot();
@@ -435,7 +483,7 @@ export function writeLiveFile(dir: string, bot: LiveFile): void {
   fs.mkdirSync(dir, { recursive: true });
   const target = botFile(dir);
   const temp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(bot), "utf8");
+  fs.writeFileSync(temp, JSON.stringify({ ...bot, history: bot.history.slice(-MAX_HISTORY) }), "utf8");
   fs.renameSync(temp, target);
 }
 
@@ -522,8 +570,9 @@ export async function walletStatus(
       lamports: null,
       signing: false,
       running: false,
-      params: { ...PAPER_LIVE_PARAMS },
+      params: { ...DEFAULT_LIVE_PARAMS },
       positions: [],
+      history: [],
       notice: null,
       reason: signingBlocked(false, false),
       kill: false,
@@ -546,8 +595,9 @@ export async function walletStatus(
       lamports: null,
       signing: false,
       running: false,
-      params: { ...PAPER_LIVE_PARAMS },
+      params: { ...DEFAULT_LIVE_PARAMS },
       positions: [],
+      history: [],
       notice: null,
       reason: signingBlocked(false, false),
       kill: fs.existsSync(path.join(dir, "KILL")),
@@ -567,6 +617,7 @@ export async function walletStatus(
     running,
     params: stored.params,
     positions: stored.positions,
+    history: stored.history,
     notice: stored.notice,
     reason: signingBlocked(kill, running),
     kill,

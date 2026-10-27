@@ -60,11 +60,11 @@ Desktop (desktop/main.ts, Electron):
 | `src/lib/exec/lp-chain.ts` | Meteora live signing: open, close, sell, read position value. The only file that opens the key to sign. Loads the DLMM SDK through `load-dlmm.cjs` at a runtime path. |
 | `src/lib/exec/lp-runner.ts` | Meteora live pass. |
 | `src/lib/exec/wallet.ts` | Wallet files (create, import), live book (`bot.json`), status for the dashboard. |
-| `src/lib/exec/intents.ts`, `live-book.ts`, `live-params.ts`, `sell-rule.ts` | Intent journal, positions, parameters and presets, leftover-token sales. |
+| `src/lib/exec/intents.ts`, `live-book.ts`, `live-params.ts`, `sell-rule.ts` | Intent journal, positions, parameters and presets (Recomendado is the default), leftover-token sales. |
 | `src/lib/lp/*` | Meteora: `bidask.ts` (position math), `meteora.ts` (API parsing, screen, forward test), `datapi.ts`, `history.ts`. |
 | `src/lib/bot/market.ts` | SOL/USD price for the dashboard and Telegram. |
 | `src/lib/notify/telegram.ts` | Live alerts and owner commands. |
-| `src/components/wallet-live.tsx` | The dashboard (terminal theme). `wallet-import.tsx`, `logo.tsx`, `binary-rain.tsx`. |
+| `src/components/wallet-live.tsx` | The dashboard (terminal theme), including the closed-position history. `wallet-import.tsx`, `logo.tsx`, `binary-rain.tsx`. |
 | `src/lib/logo-grid.ts` | The pixel-chicken grid. `src/app/icon.svg`, `public/logo.svg` and `desktop/*.png` are drawn from it. |
 | `desktop/main.ts`, `desktop/preload.ts` | Electron shell and its only bridge. |
 | `scripts/desktop.mjs`, `electron-builder.yml` | Desktop build. |
@@ -105,6 +105,8 @@ Use `.env.local` for `npm run dev`, `/etc/solana-bot.env` on the VM, and `config
 - **Meteora live costs:**
   - A position locks ~0.057 SOL of rent, returned on close.
   - Each new bin array costs ~0.0714 SOL that never comes back. Opens that need one are refused unless `LIVE_MAX_BIN_ARRAY_RENT_SOL` allows it.
+- **No re-center on the way up.** Closing when the token rose 10% and reopening higher was removed: in the Sep–Oct 2026 hourly backtest it was 3 of every 4 exits, earned almost no fees and paid fees every round trip. Do not bring it back without a backtest that shows otherwise.
+- **Default size is 25% per position.** A position over ~70 bins locks ~0.1 SOL of returnable rent, so at 10% positions shrank to ~0.025 SOL and fixed costs ate the fees.
 - **DLMM loading:** `lp-chain.ts` requires `src/lib/exec/load-dlmm.cjs` from `process.cwd()` so Next does not bundle the SDK's broken ESM build. Next cannot trace it, so `scripts/desktop.mjs` traces it with nft and copies it into the standalone server. Keep both in step.
 - **Desktop on Linux:** Ubuntu 24.04+ blocks Chromium's sandbox for AppImages through AppArmor. The `.deb` ships an AppArmor profile; for local tests run the unpacked app with `--no-sandbox`.
 - **Windows build from Linux** needs Wine for NSIS and the exe icon. Without it, build `--win zip -c.win.signAndEditExecutable=false`, or use the GitHub workflow.

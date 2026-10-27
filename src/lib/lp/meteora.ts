@@ -25,6 +25,8 @@ export type RawPair = {
   token_y?: { address?: string };
   bin_step?: number;
   pool_config?: { bin_step?: number; base_fee_pct?: number };
+  /** Pool creation time in ms (Data API). */
+  created_at?: number;
   base_fee_percentage?: string | number;
   liquidity?: string | number;
   tvl?: number;

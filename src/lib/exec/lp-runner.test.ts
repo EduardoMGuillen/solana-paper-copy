@@ -6,7 +6,8 @@ import { readIntents } from "./intents";
 import type { LiveCandidate } from "./lp-plan";
 import { runLiveCycle, sendLiveDigest } from "./lp-runner";
 import { IncompleteOpen, type LiveChain } from "./lp-chain";
-import { closeLivePosition, createDedicatedWallet, readLiveFile, setLiveBot } from "./wallet";
+import { PAPER_LIVE_PARAMS } from "./live-params";
+import { closeLivePosition, createDedicatedWallet, readLiveFile, saveLiveParams, setLiveBot } from "./wallet";
 
 const pool = "EQEu6NyEq8nECAiem1YkTu3uDBiGTEA2tYBLBmr9YJ7Y";
 const dirs: string[] = [];
@@ -38,6 +39,12 @@ function candidate(): LiveCandidate {
     solIsY: true,
     tokenMint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   };
+}
+
+/** Fixtures are sized for 10% per position (0.2 SOL of a 2 SOL wallet). */
+function startAtTenPercent(dir: string): void {
+  saveLiveParams(dir, PAPER_LIVE_PARAMS);
+  setLiveBot(dir, true);
 }
 
 const positionKey = "Pos111111111111111111111111111111111111111";
@@ -73,7 +80,7 @@ describe("live cycle", () => {
   it("opens one real record and does not open it again", async () => {
     const dir = tempDir();
     createDedicatedWallet(dir);
-    setLiveBot(dir, true);
+    startAtTenPercent(dir);
     const calls: string[] = [];
     const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
     const used = chain(2_000_000_000, calls);
@@ -174,7 +181,7 @@ describe("live cycle", () => {
   it("adopts a signed open whose confirm failed but which landed", async () => {
     const dir = tempDir();
     createDedicatedWallet(dir);
-    setLiveBot(dir, true);
+    startAtTenPercent(dir);
     const calls: string[] = [];
     const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
     const onChain = new Set<string>();
@@ -245,7 +252,7 @@ describe("live cycle", () => {
   it("takes profit on the on-chain value", async () => {
     const dir = tempDir();
     createDedicatedWallet(dir);
-    setLiveBot(dir, true);
+    startAtTenPercent(dir);
     const calls: string[] = [];
     const env = { LIVE_MIN_SOL_RESERVE: "0.03", LIVE_LP_MAX_SOL: "0.3" };
     let worth = 200_000_000;
@@ -256,6 +263,10 @@ describe("live cycle", () => {
     expect(calls).toEqual(["open", "close", "sell"]);
     expect(readLiveFile(dir).positions).toHaveLength(0);
     expect(readIntents(dir).some((intent) => intent.kind === "close" && intent.status === "confirmed")).toBe(true);
+    const [closed] = readLiveFile(dir).history;
+    expect(closed).toMatchObject({ pool, name: "WEFT-SOL", reason: "take-profit", openedAt: 10_000, closedAt: 20_000, signature: "sigclose" });
+    expect(closed.positionPct).toBeCloseTo(0.1, 6);
+    expect(closed.resultSol).toBeCloseTo(closed.stakeSol * 0.1, 9);
   });
 
   it("still closes when the market list fails", async () => {

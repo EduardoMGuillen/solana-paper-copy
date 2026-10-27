@@ -1,7 +1,6 @@
 /**
- * Settings for the Meteora live window.
- * Defaults match the paper book. The dashboard can change them only while
- * that bot is stopped. Nothing here signs or touches the paper files.
+ * Settings for the Meteora live bot. The dashboard can change them only while
+ * the bot is stopped. Nothing here signs.
  */
 
 export type LiveParams = {
@@ -21,9 +20,11 @@ export type LiveParams = {
   range: number;
   /** Bin width as a fraction. 0.01 = 1%. */
   binStep: number;
+  /** Skip pools created less than this many days ago. 0 = any age. */
+  minAgeDays: number;
 };
 
-/** What Meteora paper uses for a new position today. */
+/** Decoder Farmer screen, exits and shape at 10% per position: the base every preset starts from. */
 export const PAPER_LIVE_PARAMS: LiveParams = {
   slot: 0.1,
   minTvl: 10_000,
@@ -35,7 +36,15 @@ export const PAPER_LIVE_PARAMS: LiveParams = {
   holdHours: 24,
   range: 0.75,
   binStep: 0.01,
+  minAgeDays: 0,
 };
+
+/**
+ * What a new wallet starts with. In an hourly backtest (Sep 26 – Oct 26 2026, 105 SOL pools,
+ * fees credited only to liquidity in the bins price crossed), 25% per position instead of 10%
+ * cut fixed costs per SOL, and it was the only tested setup that ended the month positive.
+ */
+export const DEFAULT_LIVE_PARAMS: LiveParams = { ...PAPER_LIVE_PARAMS, slot: 0.25 };
 
 export type LivePreset = {
   id: string;
@@ -46,24 +55,23 @@ export type LivePreset = {
 
 export const LIVE_PRESETS: LivePreset[] = [
   {
-    id: "papel",
-    name: "Papel",
-    blurb: "10% por posición, +8% / −20% / 24 h. Es el libro de papel.",
-    params: PAPER_LIVE_PARAMS,
+    id: "recomendado",
+    name: "Recomendado",
+    blurb: "25% por posición, filtro Decoder, +8% / −20% / 24 h. Backtest de un mes: +5% a +7% con comisiones realistas, −2% a 0% con pesimistas. Peor posición −21%.",
+    params: DEFAULT_LIVE_PARAMS,
   },
   {
-    id: "activo",
-    name: "Activo",
-    blurb: "25% por posición. Los filtros y las salidas siguen siendo los del papel.",
-    params: { ...PAPER_LIVE_PARAMS, slot: 0.25 },
+    id: "conservador",
+    name: "Conservador",
+    blurb: "Solo pools de 14+ días y TVL de 50k+. Peor posición −10%, pero en el backtest el mes cerró en −2% a −4%.",
+    params: { ...DEFAULT_LIVE_PARAMS, minTvl: 50_000, minFees24h: 2_000, minAgeDays: 14 },
   },
   {
     id: "agresivo",
     name: "Agresivo",
-    blurb: "25% por posición, filtros más bajos, toma al +12%, stop al −30% y 48 h.",
+    blurb: "Filtros más bajos, toma +12%, stop −30%, 48 h. Backtest: +23% con comisiones realistas, +6% pesimistas, peor −8%. Ojo: solo 36 posiciones y entra a pools chicos, los que más se hunden.",
     params: {
-      ...PAPER_LIVE_PARAMS,
-      slot: 0.25,
+      ...DEFAULT_LIVE_PARAMS,
       minTvl: 5_000,
       minFees24h: 500,
       minBaseFeePct: 0.5,
@@ -86,6 +94,7 @@ const BOUNDS: Record<keyof LiveParams, [number, number]> = {
   holdHours: [1, 168],
   range: [0.2, 0.9],
   binStep: [0.002, 0.05],
+  minAgeDays: [0, 90],
 };
 
 export function sameLiveParams(a: LiveParams, b: LiveParams): boolean {
@@ -93,7 +102,7 @@ export function sameLiveParams(a: LiveParams, b: LiveParams): boolean {
 }
 
 /** Keep each field inside its bound. Missing or broken fields stay on `base`. */
-export function clampLiveParams(raw: unknown, base: LiveParams = PAPER_LIVE_PARAMS): LiveParams {
+export function clampLiveParams(raw: unknown, base: LiveParams = DEFAULT_LIVE_PARAMS): LiveParams {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const out: LiveParams = { ...base };
   for (const key of Object.keys(BOUNDS) as (keyof LiveParams)[]) {
@@ -102,7 +111,7 @@ export function clampLiveParams(raw: unknown, base: LiveParams = PAPER_LIVE_PARA
     if (!Number.isFinite(parsed)) continue;
     const [min, max] = BOUNDS[key];
     const next = Math.min(max, Math.max(min, parsed));
-    out[key] = key === "holdHours" ? Math.round(next) : next;
+    out[key] = key === "holdHours" || key === "minAgeDays" ? Math.round(next) : next;
   }
   return out;
 }

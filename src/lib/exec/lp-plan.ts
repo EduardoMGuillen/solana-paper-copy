@@ -26,7 +26,12 @@ export function positionRentLamports(bins: number): number {
 export const OPEN_FEE_LAMPORTS = 5_000_000;
 export const MIN_OPEN_LAMPORTS = 10_000_000;
 
-export type LiveCandidate = PoolSnap & { solIsY: boolean; tokenMint: string };
+export type LiveCandidate = PoolSnap & {
+  solIsY: boolean;
+  tokenMint: string;
+  /** Pool creation time from the Data API, when it says. */
+  createdAt?: number | null;
+};
 
 /**
  * What the chain says one open position is worth right now.
@@ -43,14 +48,6 @@ export const BIN_ARRAY_RENT_LAMPORTS = 71_437_440;
 
 /** The open is refused when the on-chain price is this far from the screened price. */
 export const MAX_OPEN_PRICE_DRIFT = 0.1;
-
-/**
- * Bid-Ask sits wholly below the price it opened at, so a token that runs up
- * leaves the SOL idle and earning nothing. Past this rise the position is
- * closed and the next pass may open again at the new price. Not yet validated
- * on collected data.
- */
-export const RECENTER_ABOVE = 0.1;
 
 /** `pricePerToken` from the SDK is X priced in Y. Returns SOL per token either way. */
 export function solPerToken(pricePerToken: number, solIsY: boolean): number {
@@ -164,11 +161,28 @@ function toCandidate(pair: RawPair, now: number): LiveCandidate | null {
   if (!solIsY && !solIsX) return null;
   const snap = toSnap(pair, now);
   if (!snap) return null;
-  return { ...snap, solIsY, tokenMint: solIsY ? mintX : mintY };
+  const created = Number(pair.created_at);
+  return { ...snap, solIsY, tokenMint: solIsY ? mintX : mintY, createdAt: created > 0 ? created : null };
 }
 
-export function choosePool(candidates: LiveCandidate[], rules: ScreenRules, range: number, busy: Set<string>, maxBins = MAX_POSITION_BINS): LiveCandidate | null {
-  const ready = candidates.filter((pool) => passes(pool, rules) && !busy.has(pool.address) && positionRange(range, pool.binStep, maxBins) != null);
+/** Old enough to trade. With an age required, a pool of unknown age stays out. */
+export function oldEnough(pool: LiveCandidate, minAgeDays: number, now: number): boolean {
+  if (!(minAgeDays > 0)) return true;
+  if (!pool.createdAt) return false;
+  return now - pool.createdAt >= minAgeDays * 86_400_000;
+}
+
+export function choosePool(
+  candidates: LiveCandidate[],
+  rules: ScreenRules & { minAgeDays?: number },
+  range: number,
+  busy: Set<string>,
+  maxBins = MAX_POSITION_BINS,
+  now = Date.now(),
+): LiveCandidate | null {
+  const ready = candidates.filter(
+    (pool) => passes(pool, rules) && oldEnough(pool, rules.minAgeDays ?? 0, now) && !busy.has(pool.address) && positionRange(range, pool.binStep, maxBins) != null,
+  );
   ready.sort((a, b) => b.fees24h / b.tvl - a.fees24h / a.tvl);
   return ready[0] ?? null;
 }
@@ -192,9 +206,8 @@ function markAt(position: LivePosition, mark: PositionMark | undefined, now: num
   if (price && position.lastPrice && price / position.lastPrice <= 0.8) {
     return { ...marked, closing: true, closeReason: "rug", note: "El precio cayó de golpe. Cerrando." };
   }
-  if (tokenPct != null && tokenPct >= RECENTER_ABOVE) {
-    return { ...marked, closing: true, closeReason: "above", note: "El precio subió lejos del rango. Cerrando para reabrir." };
-  }
+  // No re-center when the token runs up: in the Sep–Oct 2026 hourly backtest that close-and-reopen
+  // churn was 3 of every 4 exits, earned almost no fees and paid fees on every round trip.
   if (positionPct == null) return marked;
   if (positionPct >= params.takeProfit) return { ...marked, closing: true, closeReason: "take-profit", note: "Llegó a la toma. Cerrando." };
   if (positionPct <= -params.stopLoss) return { ...marked, closing: true, closeReason: "loss", note: "Llegó al stop. Cerrando." };
@@ -234,7 +247,7 @@ export function planLiveLp(input: {
   }
   const busy = new Set(positions.map((position) => position.address));
   for (const [address, until] of Object.entries(input.skipped ?? {})) if (until > input.now) busy.add(address);
-  const pool = choosePool(input.candidates, input.params, input.params.range, busy, maxBins);
+  const pool = choosePool(input.candidates, input.params, input.params.range, busy, maxBins, input.now);
   const shaped = pool ? positionRange(input.params.range, pool.binStep, maxBins) : null;
   const openStakeLamports = positions.filter((position) => !position.closing).reduce((sum, position) => sum + Math.round(position.stakeSol * 1_000_000_000), 0);
   const lamports = openLamports({

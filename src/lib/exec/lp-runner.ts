@@ -14,7 +14,7 @@ import type { LivePosition } from "./live-book";
 import { liveCandidates, MAX_EXTENDED_BINS, MAX_POSITION_BINS, planLiveLp, SKIP_POOL_MS, type LiveCandidate, type OpenOrder, type PositionMark } from "./lp-plan";
 import { IncompleteOpen, liveChain, type LiveChain, type SellResult, type SellTarget, type SentOpen } from "./lp-chain";
 import { DUST_SELL_REASON } from "./sell-rule";
-import { killFile, readLiveFile, readWalletAddress, walletDir, withWallet, writeLiveFile, type Leftover, type LiveFile } from "./wallet";
+import { killFile, readLiveFile, readWalletAddress, walletDir, withWallet, writeLiveFile, type ClosedPosition, type Leftover, type LiveFile } from "./wallet";
 
 const STALE_MS = 120_000;
 /** A token that could not be sold is quoted again this often. */
@@ -127,6 +127,21 @@ async function retryLeftovers(dir: string, chain: LiveChain, env: Record<string,
       writeLiveFile(dir, { ...fresh, leftovers });
     });
   }
+}
+
+/** What the panel shows for a confirmed close: the last on-chain read, fees included. */
+function closedRow(position: LivePosition, signature: string, now: number): ClosedPosition {
+  return {
+    pool: position.address,
+    name: position.name,
+    stakeSol: position.stakeSol,
+    openedAt: position.openedAt,
+    closedAt: now,
+    reason: position.closeReason ?? "manual",
+    positionPct: position.positionPct,
+    resultSol: position.positionPct == null ? null : position.stakeSol * position.positionPct,
+    signature: signature !== "already-closed" ? signature : null,
+  };
 }
 
 function limits(env: Record<string, string | undefined>) {
@@ -376,6 +391,7 @@ export async function runLiveCycle(
           ...fresh,
           positions: fresh.positions.filter((item) => item.address !== position.address),
           notice: `Cerrada ${position.name}.`,
+          history: [...fresh.history, closedRow(position, signature, now)],
         });
       });
       const realSignature = signature !== "already-closed" ? signature : null;

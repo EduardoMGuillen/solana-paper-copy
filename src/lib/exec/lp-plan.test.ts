@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PAPER_LIVE_PARAMS } from "./live-params";
+import { DEFAULT_LIVE_PARAMS, PAPER_LIVE_PARAMS } from "./live-params";
 import {
   binsBelow,
   liveCandidates,
@@ -9,7 +9,6 @@ import {
   positionRange,
   positionRentLamports,
   positionValue,
-  RECENTER_ABOVE,
   solPerToken,
   type LiveCandidate,
   type PositionMark,
@@ -256,17 +255,40 @@ describe("live open plan", () => {
     expect(late?.closeReason).toBe("time");
   });
 
-  it("closes to re-center when the price runs away above the range", () => {
-    const up = 0.001 * (1 + RECENTER_ABOVE);
-    const marked = markOne({ exists: true, valueLamports: 100_200_000, price: up * 1.01 }, 2_000, { lastPrice: up });
-    expect(marked?.closeReason).toBe("above");
-    expect(marked?.closing).toBe(true);
+  it("keeps a position open when the price runs up: no re-center churn", () => {
+    for (const up of [0.0011, 0.0013, 0.002]) {
+      const marked = markOne({ exists: true, valueLamports: 100_000_000, price: up }, 2_000, { lastPrice: up });
+      expect(marked?.closing).toBe(false);
+    }
   });
 
-  it("keeps a position whose price rose less than the re-center line", () => {
-    const up = 0.001 * (1 + RECENTER_ABOVE * 0.5);
-    const marked = markOne({ exists: true, valueLamports: 100_000_000, price: up }, 2_000, { lastPrice: up });
-    expect(marked?.closing).toBe(false);
+  it("skips pools younger than the minimum age, and pools of unknown age when an age is required", () => {
+    const day = 86_400_000;
+    const now = 30 * day;
+    const young = { ...candidate(250), address: "95zNQQ8juGpu8odzpbp63ZNtXuTnnBeBsHovUjpe32d8", name: "YOUNG-SOL", fees24h: 9_000, createdAt: now - 3 * day };
+    const unknown = { ...candidate(250), address: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj", name: "UNKNOWN-SOL", fees24h: 8_000 };
+    const old = { ...candidate(250), createdAt: now - 20 * day };
+    const plan = (minAgeDays: number) =>
+      planLiveLp({
+        running: true,
+        kill: false,
+        balanceLamports: 2_000_000_000,
+        reserveLamports: 30_000_000,
+        maxSol: 0.3,
+        params: { ...PAPER_LIVE_PARAMS, minAgeDays },
+        positions: [],
+        candidates: [young, unknown, old],
+        marks: {},
+        now,
+        pendingOpen: false,
+      });
+    expect(plan(14).open?.name).toBe("WEFT-SOL");
+    expect(plan(0).open?.name).toBe("YOUNG-SOL");
+    expect(plan(60).open).toBeNull();
+  });
+
+  it("defaults to the recommended profile: 25% per position, Decoder screen and exits", () => {
+    expect(DEFAULT_LIVE_PARAMS).toEqual({ ...PAPER_LIVE_PARAMS, slot: 0.25 });
   });
 
   it("does not re-center a position the price came back into", () => {

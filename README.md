@@ -6,6 +6,21 @@ Pone SOL en pools Bid-Ask, por debajo del precio, y cierra cada posición al lle
 
 > **Mueve dinero real.** Con Start, el bot firma transacciones con tu wallet dedicada. Úsala solo para el bot y pon en ella solo lo que estés dispuesto a perder. Los límites duros (`LIVE_LP_MAX_SOL`, `LIVE_MIN_SOL_RESERVE`, el archivo `KILL`) viven en la configuración y la interfaz no los puede cambiar. El diseño completo está en [docs/EJECUCION-REAL.md](docs/EJECUCION-REAL.md).
 
+## Estrategia
+
+Cada 15 s, si hay SOL libre, el bot elige entre los pools token/SOL que pasan el filtro el que más comisiones cobra por su liquidez. Pone el 25% del SOL libre por debajo del precio, en forma Bid-Ask hasta −75%. Cierra al +8%, al −20% o a las 24 h, medido con el valor real de la posición en la cadena. Si el precio cae 20% de golpe entre dos lecturas, cierra de inmediato.
+
+Backtest por hora del último mes (26 sep – 26 oct 2026, 105 pools SOL), en SOL, donde mantener el SOL = 0%:
+
+| Perfil | Comisiones realistas | Comisiones pesimistas | Peor posición |
+|---|---|---|---|
+| **Recomendado** (por defecto) | +5% a +7% | −2% a 0% | −21% |
+| Conservador (pools de 14+ días, TVL 50k+) | −2% a −4% | −4% a −5% | −10% |
+| Agresivo | +23% a +24% | +6% a +7% | −8% (solo 36 posiciones) |
+| La estrategia anterior (10%, reabrir al +10%) | −7% a −17% | −10% a −20% | −21% |
+
+Es **un solo mes**. El historial solo trae los pools que siguen vivos y usa el TVL de hoy, así que los pools que se hundieron no cuentan. La realidad probablemente es peor. El panel `history` registra el resultado real de cada posición cerrada: esa es la medida que cuenta.
+
 ## App de escritorio
 
 ### Instalar
