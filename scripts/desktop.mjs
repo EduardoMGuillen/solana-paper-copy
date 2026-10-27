@@ -47,21 +47,44 @@ for (const file of fileList) {
 }
 console.log(`DLMM: ${fileList.size} archivos rastreados`);
 
-// Next links hashed external names to node_modules. Windows installers do not keep symlinks, so make them real folders.
-function dereference(dir) {
+// Next links hashed external names (`.next/node_modules/@solana/web3.js-<hash>`) to node_modules.
+// Windows installers do not keep symlinks, and a copied folder would load a second web3.js: the
+// DLMM SDK's transactions would then fail `instanceof Transaction` inside Connection. Replace each
+// link with a one-line package that re-exports the real module, so every caller shares one instance.
+function shimLinks(dir) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isSymbolicLink()) {
       const real = fs.realpathSync(full);
+      const relative = path.relative(standalone, real).split(path.sep).join("/");
       fs.rmSync(full);
-      fs.cpSync(real, full, { recursive: true, dereference: true });
+      fs.mkdirSync(full);
+      fs.writeFileSync(path.join(full, "package.json"), JSON.stringify({ name: entry.name, main: "index.js" }));
+      const depth = path.relative(standalone, full).split(path.sep).length;
+      fs.writeFileSync(path.join(full, "index.js"), `module.exports = require(${JSON.stringify(`${"../".repeat(depth)}${relative}`)});\n`);
     } else if (entry.isDirectory()) {
-      dereference(full);
+      shimLinks(full);
     }
   }
 }
-dereference(path.join(standalone, ".next", "node_modules"));
+shimLinks(path.join(standalone, ".next", "node_modules"));
+
+// Refuse to ship two copies of web3.js: the app's external and the DLMM SDK's must be the same class.
+{
+  const solanaDir = path.join(standalone, ".next", "node_modules", "@solana");
+  const hashed = fs.existsSync(solanaDir) ? fs.readdirSync(solanaDir).filter((name) => name.startsWith("web3.js")) : [];
+  const fromStandalone = createRequire(path.join(standalone, "package.json"));
+  const sdkWeb3 = createRequire(fromStandalone.resolve("@meteora-ag/dlmm")).resolve("@solana/web3.js");
+  for (const name of hashed) {
+    const appWeb3 = fromStandalone(path.join(solanaDir, name));
+    if (appWeb3.Transaction !== fromStandalone(sdkWeb3).Transaction) {
+      console.error(`Dos copias de @solana/web3.js en el servidor (${name} y la del SDK). Las transacciones de Meteora fallarían.`);
+      process.exit(1);
+    }
+  }
+  console.log(`web3.js: una sola instancia (${hashed.length} alias)`);
+}
 
 // Secrets never ship: drop any env file the build may have copied.
 for (const name of fs.readdirSync(standalone)) {
