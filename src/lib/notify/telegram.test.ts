@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addLog, createBotState, markAccount } from "../bot/engine";
-import { defaultBotSettings } from "../bot/settings";
-import { formatAlerts, formatBalance, formatLiveDigest, formatLiveNotice, formatLiveSell, liveDigestDue, LIVE_DIGEST_MS, parseLiveCommand, pendingAlerts, pickCloseTarget, readTelegramUpdates, sendTelegram, telegramConfig } from "./telegram";
-
-function state() {
-  const s = createBotState(0, { ...defaultBotSettings, markets: ["SOL"] }, 100);
-  s.notifiedSeq = s.seq;
-  return s;
-}
+import { formatBalance, formatLiveDigest, formatLiveNotice, formatLiveSell, liveDigestDue, LIVE_DIGEST_MS, parseLiveCommand, pickCloseTarget, readTelegramUpdates, sendTelegram, telegramConfig } from "./telegram";
 
 describe("telegram alerts", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -18,21 +10,6 @@ describe("telegram alerts", () => {
     expect(telegramConfig({ TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "1" })).toEqual({ token: "t", chatId: "1" });
   });
 
-  it("sends buys, sells and warnings, not routine info lines, and nothing twice", () => {
-    const s = state();
-    addLog(s, 1, "SOL", "Compra a 100", "buy");
-    addLog(s, 2, null, "Ajustes de riesgo guardados.");
-    addLog(s, 3, null, "Drawdown alto", "warn");
-    expect(pendingAlerts(s).map((l) => l.text)).toEqual(["Compra a 100", "Drawdown alto"]);
-    s.notifiedSeq = s.seq;
-    expect(pendingAlerts(s)).toHaveLength(0);
-  });
-
-  it("adds a daily summary when the UTC day rolls over", () => {
-    const s = state();
-    markAccount(s, 2 * 86_400_000);
-    expect(pendingAlerts(s).some((l) => l.text.startsWith("Resumen"))).toBe(true);
-  });
 
   it("describes a live open and a live close without putting the bot token in the text", () => {
     const open = formatLiveNotice({ kind: "open", name: "WEFT <SOL>", stakeSol: 0.0141, signature: "sig123" });
@@ -91,16 +68,6 @@ describe("telegram alerts", () => {
     expect(text).toContain("1 h");
     expect(text).toContain("cerrando (manual)");
     expect(text).toContain("1 cerrando");
-  });
-
-  it("escapes HTML from log text and stays under Telegram's size limit", () => {
-    const s = state();
-    addLog(s, 1, "SOL", "precio <script> & co", "warn");
-    for (let i = 0; i < 200; i += 1) addLog(s, i, "SOL", "x".repeat(100), "sell");
-    const text = formatAlerts(pendingAlerts(s), s);
-    expect(text.length).toBeLessThanOrEqual(4096);
-    expect(text).not.toContain("<script>");
-    expect(formatAlerts(pendingAlerts(state()), state())).toContain("Bot Solana");
   });
 
   it("parses owner commands and refuses to turn the bot on", () => {

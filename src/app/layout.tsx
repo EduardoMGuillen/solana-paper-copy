@@ -1,32 +1,22 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Fira_Code, Fira_Sans } from "next/font/google";
+import { BinaryRain } from "@/components/binary-rain";
+import "@fontsource-variable/fira-code";
 import "./globals.css";
 
-const sans = Fira_Sans({
-  variable: "--font-sans-app",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const mono = Fira_Code({
-  variable: "--font-mono-app",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
-
 export const metadata: Metadata = {
-  title: "Bot de estrategia Solana",
-  description: "Bot de trading por análisis técnico con validación walk-forward. Papel, precios reales.",
+  title: "PolloTraderBot",
+  description: "Bot de liquidez Meteora DLMM en Solana con wallet dedicada.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="es"
-      className={`${sans.variable} ${mono.variable} dark h-full antialiased`}
-    >
-      <body className="min-h-full bg-background text-foreground">{children}</body>
+    <html lang="es" className="dark h-full antialiased">
+      <body className="min-h-full bg-background text-foreground">
+        <BinaryRain />
+        <div className="relative z-10">{children}</div>
+        <div className="scanlines" aria-hidden="true" />
+      </body>
     </html>
   );
 }

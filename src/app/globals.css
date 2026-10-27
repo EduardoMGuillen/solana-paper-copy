@@ -7,9 +7,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans-app);
-  --font-mono: var(--font-mono-app);
-  --font-heading: var(--font-sans-app);
+  --font-sans: "Fira Code Variable", ui-monospace, monospace;
+  --font-mono: "Fira Code Variable", ui-monospace, monospace;
+  --font-heading: "Fira Code Variable", ui-monospace, monospace;
+  --color-warn: var(--warn);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,73 +49,41 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --card: #0e1223;
-  --card-foreground: #f8fafc;
-  --popover: #0e1223;
-  --popover-foreground: #f8fafc;
-  --primary: #22c55e;
-  --primary-foreground: #0f172a;
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
-  --muted: #1a1e2f;
-  --muted-foreground: #94a3b8;
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
-  --destructive: #ef4444;
-  --border: #334155;
-  --input: #334155;
-  --ring: #ffffff;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
+:root,
 .dark {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --card: #0e1223;
-  --card-foreground: #f8fafc;
-  --popover: #0e1223;
-  --popover-foreground: #f8fafc;
-  --primary: #22c55e;
-  --primary-foreground: #0f172a;
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
-  --muted: #1a1e2f;
-  --muted-foreground: #94a3b8;
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
-  --destructive: #ef4444;
-  --border: #334155;
-  --input: #334155;
-  --ring: #ffffff;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #000000;
+  --foreground: #00ff41;
+  --card: #020a04;
+  --card-foreground: #00ff41;
+  --popover: #020a04;
+  --popover-foreground: #00ff41;
+  --primary: #00ff41;
+  --primary-foreground: #000000;
+  --secondary: #062b10;
+  --secondary-foreground: #00ff41;
+  --muted: #041a0a;
+  --muted-foreground: #3fae5a;
+  --accent: #062b10;
+  --accent-foreground: #00ff41;
+  --destructive: #ff3b3b;
+  --warn: #ffb000;
+  --border: #0d4a1f;
+  --input: #0d4a1f;
+  --ring: #00ff41;
+  --chart-1: #00ff41;
+  --chart-2: #00b32c;
+  --chart-3: #3fae5a;
+  --chart-4: #0d4a1f;
+  --chart-5: #062b10;
+  --radius: 0;
+  --sidebar: #020a04;
+  --sidebar-foreground: #00ff41;
+  --sidebar-primary: #00ff41;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #062b10;
+  --sidebar-accent-foreground: #00ff41;
+  --sidebar-border: #0d4a1f;
+  --sidebar-ring: #00ff41;
 }
 
 @layer base {
@@ -134,14 +103,47 @@
     cursor: pointer;
   }
   .num {
-    font-family: var(--font-mono-app), ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
   .gain {
-    color: #22c55e;
+    color: var(--primary);
   }
   .loss {
-    color: #ef4444;
+    color: var(--destructive);
+  }
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+@layer components {
+  /* Soft phosphor glow on the green text that matters. */
+  .glow {
+    text-shadow: 0 0 6px rgb(0 255 65 / 0.55);
+  }
+  .glow-red {
+    text-shadow: 0 0 6px rgb(255 59 59 / 0.55);
+  }
+  /* CRT scanlines over the whole window. Purely visual, never catches clicks. */
+  .scanlines {
+    pointer-events: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0) 0, rgb(0 0 0 / 0) 2px, rgb(0 0 0 / 0.22) 3px);
+  }
+  .cursor::after {
+    content: "\2588";
+    margin-left: 0.25ch;
+    animation: blink 1s steps(1) infinite;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
   }
 }
 

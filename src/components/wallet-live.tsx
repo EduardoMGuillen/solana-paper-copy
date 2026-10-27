@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DeskNav } from "@/components/nav";
+import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LivePosition } from "@/lib/exec/live-book";
@@ -168,129 +168,125 @@ export function WalletLive() {
   const activePreset = draft ? (LIVE_PRESETS.find((preset) => sameLiveParams(draft, preset.params))?.id ?? null) : null;
   const rangePct = params ? params.range * 100 : 75;
 
+  const copyAddress = () => {
+    if (!address) return;
+    const mark = (ok: boolean) => {
+      setCopyFailed(!ok);
+      setCopied(ok);
+      if (ok) window.setTimeout(() => setCopied(false), 1500);
+    };
+    void navigator.clipboard.writeText(address).then(
+      () => mark(true),
+      () => {
+        const input = document.createElement("textarea");
+        input.value = address;
+        input.setAttribute("readonly", "");
+        document.body.appendChild(input);
+        input.select();
+        const ok = document.execCommand("copy");
+        input.remove();
+        mark(ok);
+      },
+    );
+  };
+
+  const state = !status ? "BOOTING" : status.kill ? "KILL" : running ? "RUNNING" : "STOPPED";
+  const errors = [error, actionError, status?.error].filter((line): line is string => Boolean(line));
+
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6">
-      <DeskNav />
-
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#070b14] shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
-        <div className="h-px bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent" />
-
-        <header className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:px-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-[11px] tracking-[0.22em] text-emerald-300/80 uppercase">Solana · DLMM · Bid-Ask</p>
-            <div className="mt-1 flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight">Meteora live</h1>
-              <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs ${running ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-400/10 text-amber-200"}`}>
-                <span className={`size-1.5 rounded-full ${running ? "animate-pulse bg-emerald-400" : "bg-amber-300"}`} />
-                {status ? (running ? "Encendido" : "Apagado") : "Leyendo"}
-              </span>
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-3 py-3 sm:px-5">
+      <header className="sticky top-0 z-20 border border-border bg-black/90 backdrop-blur">
+        <div className="flex flex-col gap-3 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <Logo className="size-10 shrink-0" />
+            <div>
+              <h1 className="glow text-base leading-none font-bold tracking-[0.2em] sm:text-lg">POLLOTRADERBOT</h1>
+              <p className="text-[11px] text-muted-foreground">meteora://dlmm/bid-ask · solana mainnet</p>
             </div>
-            <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-              Liquidez solo en SOL, por debajo del precio. El papel de Estrategia y el de Meteora siguen en sus páginas.
+            <StatePill state={state} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="num flex min-h-10 items-center gap-2 border border-border px-3 text-xs hover:border-primary disabled:opacity-50"
+              disabled={!address}
+              onClick={copyAddress}
+              title={address ?? undefined}
+            >
+              <span className="text-muted-foreground">wallet</span>
+              <span>{address ? `${address.slice(0, 4)}…${address.slice(-4)}` : "—"}</span>
+              <span className="text-muted-foreground">{copied ? "[copiada]" : copyFailed ? "[error]" : "[copiar]"}</span>
+            </button>
+            <div className="num flex min-h-10 items-center gap-2 border border-border px-3 text-sm">
+              <span className="glow">{status?.balanceSol == null ? "—" : sol(status.balanceSol)}</span>
+              {status?.balanceUsd != null ? <span className="text-xs text-muted-foreground">{money(status.balanceUsd)}</span> : null}
+            </div>
+            <Button type="button" className="glow-none min-h-10 px-5 font-bold tracking-widest" disabled={!status || busy || running || status.kill} aria-pressed={running} onClick={() => void post({ running: true })}>
+              ▶ START
+            </Button>
+            <Button type="button" variant="destructive" className="min-h-10 border border-destructive/60 px-5 font-bold tracking-widest" disabled={!status || busy || (!running && (status.positions?.length ?? 0) === 0)} aria-pressed={!running} onClick={() => void post({ running: false })}>
+              ■ STOP
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <Panel title="sys.log">
+        <div className="flex flex-col gap-1 px-3 py-2 text-sm">
+          <p>
+            <span className="text-muted-foreground">root@pollo:~$ </span>
+            <span className="cursor">{status?.notice ?? "Start abre posiciones reales con esta wallet. Stop las cierra todas. Cada fila se puede cerrar sola."}</span>
+          </p>
+          {status?.balanceSol === 0 ? <p className="text-warn">[WARN] La wallet está en 0 SOL: no se abre nada y no se envía ninguna transacción.</p> : null}
+          {status?.kill ? <p className="glow-red text-destructive">[KILL] Existe el archivo KILL: el bot no firma nada.</p> : null}
+          {errors.map((line) => (
+            <p key={line} className="glow-red text-destructive">[ERR] {line}</p>
+          ))}
+          {status ? (
+            <p className="num text-xs text-muted-foreground">
+              mode={status.limits.liveMode} · firma={status.signing ? "sí" : "no"} · tope={sol(status.limits.lpMaxSol)} · reserva={sol(status.limits.minReserveSol)} · journal={status.journal}
+            </p>
+          ) : null}
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric k="total" v={totalSol == null ? "—" : sol(totalSol)} hint={totalSol == null || price == null ? "Wallet, liquidez y alquiler" : money(totalSol * price)} />
+        <Metric k="wallet" v={status?.balanceSol == null ? "—" : sol(status.balanceSol)} hint={status?.balanceUsd == null ? (status?.balanceSol === 0 ? "Sin fondos" : "Libre en la wallet") : money(status.balanceUsd)} />
+        <Metric k="en_pools" v={sol(poolsSol)} hint={poolsSol === 0 ? "Sin liquidez puesta" : price == null ? "Liquidez y alquiler" : money(poolsSol * price)} />
+        <Metric k="posiciones" v={String(openPositions.length)} hint={rentMissing ? "Falta el alquiler de una posición" : params ? `Cada nueva usa el ${plain(params.slot * 100, 0)}%` : "—"} />
+      </div>
+
+      <Panel title="positions" right={`${running ? "running" : "stopped"} · ${openPositions.length} abiertas`}>
+        {openPositions.length === 0 ? (
+          <div className="px-3 py-8 text-center">
+            <p className="text-muted-foreground">-- sin posiciones abiertas --</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {running
+                ? status?.balanceSol === 0
+                  ? "El bot está encendido y la wallet sigue en 0 SOL. No hay liquidez que poner en un pool."
+                  : "El bot está encendido. Todavía no hay una posición abierta."
+                : "El bot está apagado. Start es el que empieza a abrir."}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button type="button" className="min-h-11 cursor-pointer px-5" disabled={!status || busy || running || status.kill} aria-pressed={running} onClick={() => void post({ running: true })}>
-              Start
-            </Button>
-            <Button type="button" variant="destructive" className="min-h-11 cursor-pointer px-5" disabled={!status || busy || (!running && (status.positions?.length ?? 0) === 0)} aria-pressed={!running} onClick={() => void post({ running: false })}>
-              Stop
-            </Button>
-          </div>
-        </header>
-        <p className="border-b border-white/10 px-4 py-2 text-sm text-muted-foreground sm:px-5">
-          {status?.notice ?? "Start abre posiciones reales con esta wallet. Stop las cierra todas. Cada fila se puede cerrar sola."}
-          {status?.balanceSol === 0 ? " La wallet está en 0 SOL: no se abre nada y no se envía ninguna transacción." : ""}
-        </p>
-
-        <div className="grid grid-cols-2 divide-x divide-y divide-white/10 border-b border-white/10 md:grid-cols-4 md:divide-y-0">
-          <Metric k="Valor total" v={totalSol == null ? "—" : sol(totalSol)} hint={totalSol == null || price == null ? "Wallet, liquidez y alquiler" : money(totalSol * price)} />
-          <Metric k="Wallet" v={status?.balanceSol == null ? "—" : sol(status.balanceSol)} hint={status?.balanceUsd == null ? (status?.balanceSol === 0 ? "Sin fondos" : "Libre en la wallet") : money(status.balanceUsd)} />
-          <Metric k="En pools" v={sol(poolsSol)} hint={poolsSol === 0 ? "Sin liquidez puesta" : price == null ? "Liquidez y alquiler" : money(poolsSol * price)} />
-          <Metric k="Posiciones" v={String(openPositions.length)} hint={rentMissing ? "Falta el alquiler de una posición" : params ? `Cada nueva usa el ${plain(params.slot * 100, 0)}%` : "—"} />
-        </div>
-
-        <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="min-w-0">
-            <p className="text-[11px] tracking-wide text-muted-foreground uppercase">Dirección</p>
-            <p className="num truncate text-sm">{address ?? "—"}</p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 shrink-0 cursor-pointer"
-            disabled={!address}
-            onClick={() => {
-              if (!address) return;
-              const mark = (ok: boolean) => {
-                setCopyFailed(!ok);
-                setCopied(ok);
-                if (ok) window.setTimeout(() => setCopied(false), 1500);
-              };
-              void navigator.clipboard.writeText(address).then(
-                () => mark(true),
-                () => {
-                  const input = document.createElement("textarea");
-                  input.value = address;
-                  input.setAttribute("readonly", "");
-                  document.body.appendChild(input);
-                  input.select();
-                  const ok = document.execCommand("copy");
-                  input.remove();
-                  mark(ok);
-                },
-              );
-            }}
-          >
-            {copied ? "Copiada" : copyFailed ? "No se pudo copiar" : "Copiar"}
-          </Button>
-        </div>
-
-        {error ? <p className="px-5 py-3 text-sm text-destructive">{error}</p> : null}
-        {actionError ? <p className="px-5 py-3 text-sm text-destructive">{actionError}</p> : null}
-        {status?.error ? <p className="px-5 pb-3 text-sm text-destructive">{status.error}</p> : null}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#070b14]">
-        <div className="flex items-end justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-5">
-          <div>
-            <p className="text-[11px] tracking-[0.18em] text-muted-foreground uppercase">Libro</p>
-            <h2 className="text-lg font-semibold">Posiciones abiertas</h2>
-          </div>
-          <p className="text-xs text-muted-foreground">{running ? "Encendido" : "Apagado"} · {status?.positions.length ?? 0} abiertas</p>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
-            <thead className="text-[11px] tracking-wide text-muted-foreground uppercase">
-              <tr className="border-b border-white/10">
-                <th className="px-4 py-3 font-medium sm:px-5">Pool</th>
-                <th className="px-3 py-3 font-medium">Tamaño</th>
-                <th className="px-3 py-3 font-medium">Valor</th>
-                <th className="px-3 py-3 font-medium">Token</th>
-                <th className="px-3 py-3 font-medium">Posición</th>
-                <th className="px-3 py-3 font-medium">Comisión</th>
-                <th className="px-3 py-3 font-medium">Tiempo</th>
-                <th className="px-4 py-3 font-medium sm:px-5">Qué pasa</th>
-                <th className="px-4 py-3 font-medium sm:px-5">Cerrar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(status?.positions.length ?? 0) === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 sm:px-5">
-                    <p className="text-base font-medium">Sin posiciones abiertas</p>
-                    <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                      {running
-                        ? status?.balanceSol === 0
-                          ? "El bot está encendido y la wallet sigue en 0 SOL. No hay liquidez que poner en un pool."
-                          : "El bot está encendido. Todavía no hay una posición abierta."
-                        : "El bot está apagado. Start es el que empieza a abrir."}
-                    </p>
-                  </td>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="num w-full min-w-[920px] text-left text-sm">
+              <thead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2 font-medium">Pool</th>
+                  <th className="px-3 py-2 font-medium">Tamaño</th>
+                  <th className="px-3 py-2 font-medium">Valor</th>
+                  <th className="px-3 py-2 font-medium">Token</th>
+                  <th className="px-3 py-2 font-medium">Posición</th>
+                  <th className="px-3 py-2 font-medium">Tiempo</th>
+                  <th className="px-3 py-2 font-medium">Qué pasa</th>
+                  <th className="px-3 py-2 font-medium" />
                 </tr>
-              ) : (
-                status?.positions.map((position) => (
+              </thead>
+              <tbody>
+                {openPositions.map((position) => (
                   <PositionRow
                     key={position.address}
                     position={position}
@@ -299,156 +295,135 @@ export function WalletLive() {
                     busy={busy}
                     onClose={() => void post({ close: position.address })}
                   />
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        <div className="grid gap-px border-t border-white/10 bg-white/10 sm:grid-cols-3">
+        <div className="grid gap-px border-t border-border bg-border sm:grid-cols-3">
+          <Readout k="token" v="Precio contra la entrada" text="Si el token sube, el SOL sigue quieto debajo del precio. La fila se queda plana." />
+          <Readout k="posición" v="Lo que le pasa al SOL" text="Suma la marca de la liquidez y las comisiones. No es el mismo porcentaje que el token." />
           <Readout
-            k="Token"
-            v="Precio contra la entrada"
-            text="Si el token sube, el SOL sigue quieto debajo del precio. La fila se queda plana."
-          />
-          <Readout
-            k="Posición"
-            v="Lo que le pasa al SOL"
-            text="Suma la marca de la liquidez y las comisiones. No es el mismo porcentaje que el token."
-          />
-          <Readout
-            k="Salida"
+            k="salida"
             v={params ? `+${plain(params.takeProfit * 100, 0)}% · −${plain(params.stopLoss * 100, 0)}% · ${plain(params.holdHours, 0)} h` : "—"}
             text="Cierra al llegar a la toma, al stop o al cumplirse el tiempo."
           />
         </div>
 
-        <div className="px-4 py-4 sm:px-5">
-          <div className="mb-2 flex items-center justify-between text-[11px] tracking-wide text-muted-foreground uppercase">
+        <div className="border-t border-border px-3 py-3">
+          <div className="mb-2 flex items-center justify-between text-[11px] tracking-wider text-muted-foreground uppercase">
             <span>Rango Bid-Ask</span>
             <span className="num">−{plain(rangePct, 0)}% → entrada</span>
           </div>
-          <div className="relative h-10 overflow-hidden rounded-lg bg-white/5">
-            <div className="absolute inset-y-1 right-0 rounded-md bg-gradient-to-l from-emerald-400/50 to-emerald-400/10" style={{ width: `${Math.min(100, Math.max(8, rangePct))}%` }} />
-            <div className="absolute inset-y-0 right-0 w-px bg-white" />
-            <div className="absolute inset-0 flex items-center justify-between px-3 text-[11px]">
-              <span className="text-emerald-100/80">SOL en los bins de abajo</span>
-              <span>Entrada</span>
-            </div>
-          </div>
+          <BinRange rangePct={rangePct} />
           <p className="mt-2 text-xs text-muted-foreground">
             El precio tiene que bajar de la entrada para que el SOL empiece a convertirse en el token. Mientras esté arriba, la posición ni gana ni pierde por el precio.
           </p>
         </div>
-      </section>
+      </Panel>
 
-      <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#070b14]">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left sm:px-5"
-          aria-expanded={configOpen}
-          onClick={() => setConfigOpen((open) => !open)}
-        >
-          <span>
-            <span className="block text-[11px] tracking-[0.18em] text-muted-foreground uppercase">Configuración</span>
-            <span className="block text-lg font-semibold">Parámetros</span>
-            <span className="block max-w-2xl text-sm text-muted-foreground">
-              {dirty
-                ? "Hay cambios sin guardar."
-                : params
-                  ? `${plain(params.slot * 100, 0)}% por posición · +${plain(params.takeProfit * 100, 0)}% / −${plain(params.stopLoss * 100, 0)}% / ${plain(params.holdHours, 0)} h`
-                  : "Leyendo los parámetros…"}
-            </span>
-          </span>
-          <span className="shrink-0 text-sm text-muted-foreground">{configOpen ? "Ocultar" : "Mostrar"}</span>
-        </button>
+      <Panel
+        title="config"
+        right={
+          <button type="button" className="text-xs hover:underline" aria-expanded={configOpen} onClick={() => setConfigOpen((open) => !open)}>
+            {configOpen ? "[ocultar]" : "[mostrar]"}
+          </button>
+        }
+      >
+        <p className="px-3 py-2 text-sm text-muted-foreground">
+          {dirty
+            ? "Hay cambios sin guardar."
+            : params
+              ? `${plain(params.slot * 100, 0)}% por posición · +${plain(params.takeProfit * 100, 0)}% / −${plain(params.stopLoss * 100, 0)}% / ${plain(params.holdHours, 0)} h`
+              : "Leyendo los parámetros…"}
+        </p>
 
         {configOpen ? (
-        <div>
-        <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            {!status
-              ? "Leyendo los parámetros…"
-              : locked
-                ? "Bloqueados con el bot encendido. Stop los deja editables."
-                : "El perfil Papel es el que usa Meteora papel ahora. Guardar no enciende el bot."}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {LIVE_PRESETS.map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                variant={activePreset === preset.id ? "default" : "outline"}
-                className="min-h-11 cursor-pointer"
-                disabled={locked || busy}
-                aria-pressed={activePreset === preset.id}
-                onClick={() => {
-                  setForm(formFrom(preset.params));
-                  markDirty(true);
-                  setSaved(false);
+          <div className="border-t border-border">
+            <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-end sm:justify-between">
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                {!status ? "Leyendo los parámetros…" : locked ? "Bloqueados con el bot encendido. Stop los deja editables." : "Elige un perfil o ajusta a mano. Guardar no enciende el bot."}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {LIVE_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    type="button"
+                    variant={activePreset === preset.id ? "default" : "outline"}
+                    className="min-h-10"
+                    disabled={locked || busy}
+                    aria-pressed={activePreset === preset.id}
+                    onClick={() => {
+                      setForm(formFrom(preset.params));
+                      markDirty(true);
+                      setSaved(false);
+                    }}
+                  >
+                    {preset.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {form ? (
+              <form
+                className="flex flex-col gap-4 px-3 pb-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const next = form ? payloadFrom(form) : null;
+                  if (!next) {
+                    setActionError("Revisa los números antes de guardar.");
+                    return;
+                  }
+                  void post({ params: next }).then((ok) => {
+                    if (ok) {
+                      markDirty(false);
+                      setSaved(true);
+                    }
+                  });
                 }}
               >
-                {preset.name}
-              </Button>
-            ))}
+                <p className="text-sm text-muted-foreground">{LIVE_PRESETS.find((preset) => preset.id === activePreset)?.blurb ?? "Perfil a mano."}</p>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Group title="tamaño">
+                    <Field label="Por posición" suffix="%" value={form.slotPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "slotPct", value)} hint="Del SOL de esta wallet." />
+                  </Group>
+                  <Group title="entrada">
+                    <Field label="TVL mínimo" suffix="US$" value={form.minTvl} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minTvl", value)} hint="Liquidez del pool." />
+                    <Field label="Comisiones 24 h" suffix="US$" value={form.minFees24h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minFees24h", value)} hint="Lo que el pool cobró en un día." />
+                    <Field label="Comisión base" suffix="%" value={form.minBaseFeePct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minBaseFeePct", value)} hint="Fee del pool." />
+                    <Field label="Volumen 1 h" suffix="US$" value={form.minVolume1h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minVolume1h", value)} hint="Operación reciente del pool." />
+                  </Group>
+                  <Group title="salida_y_rango">
+                    <Field label="Toma de ganancia" suffix="%" value={form.takeProfitPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "takeProfitPct", value)} hint="Cierra la posición al llegar aquí." />
+                    <Field label="Stop" suffix="%" value={form.stopLossPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "stopLossPct", value)} hint="Cierra si la posición cae esto." />
+                    <Field label="Tiempo máximo" suffix="h" value={form.holdHours} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "holdHours", value)} hint="Cierra aunque no haya toma ni stop." />
+                    <Field label="Rango bajo la entrada" suffix="%" value={form.rangePct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "rangePct", value)} hint="Hasta dónde se reparte el SOL." />
+                    <Field label="Ancho de bin" suffix="%" value={form.binStepPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "binStepPct", value)} hint="Separación entre bins." />
+                  </Group>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button type="submit" className="min-h-10 px-5 font-bold tracking-widest" disabled={locked || busy || !dirty}>
+                    $ guardar
+                  </Button>
+                  <p className="text-sm text-muted-foreground" aria-live="polite">
+                    {saved ? "Guardado." : dirty ? "Hay cambios sin guardar." : `TVL ${params ? usd(params.minTvl) : "—"} · fee 24 h ${params ? usd(params.minFees24h) : "—"}.`}
+                  </p>
+                </div>
+              </form>
+            ) : (
+              <p className="px-3 py-6 text-sm text-muted-foreground">Leyendo los parámetros…</p>
+            )}
           </div>
-        </div>
-
-        {form ? (
-          <form
-            className="flex flex-col gap-5 px-4 py-4 sm:px-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const next = form ? payloadFrom(form) : null;
-              if (!next) {
-                setActionError("Revisa los números antes de guardar.");
-                return;
-              }
-              void post({ params: next }).then((ok) => {
-                if (ok) {
-                  markDirty(false);
-                  setSaved(true);
-                }
-              });
-            }}
-          >
-            <p className="text-sm text-muted-foreground">{LIVE_PRESETS.find((preset) => preset.id === activePreset)?.blurb ?? "Perfil a mano."}</p>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Group title="Tamaño">
-                <Field label="Por posición" suffix="%" value={form.slotPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "slotPct", value)} hint="Del SOL de esta wallet. El papel usa 10." />
-              </Group>
-              <Group title="Entrada">
-                <Field label="TVL mínimo" suffix="US$" value={form.minTvl} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minTvl", value)} hint="Liquidez del pool." />
-                <Field label="Comisiones 24 h" suffix="US$" value={form.minFees24h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minFees24h", value)} hint="Lo que el pool cobró en un día." />
-                <Field label="Comisión base" suffix="%" value={form.minBaseFeePct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minBaseFeePct", value)} hint="Fee del pool. El papel pide 1." />
-                <Field label="Volumen 1 h" suffix="US$" value={form.minVolume1h} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "minVolume1h", value)} hint="Operación reciente del pool." />
-              </Group>
-              <Group title="Salida y rango">
-                <Field label="Toma de ganancia" suffix="%" value={form.takeProfitPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "takeProfitPct", value)} hint="Cierra la posición al llegar aquí." />
-                <Field label="Stop" suffix="%" value={form.stopLossPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "stopLossPct", value)} hint="Cierra si la posición cae esto." />
-                <Field label="Tiempo máximo" suffix="h" value={form.holdHours} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "holdHours", value)} hint="Cierra aunque no haya toma ni stop." />
-                <Field label="Rango bajo la entrada" suffix="%" value={form.rangePct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "rangePct", value)} hint="Hasta dónde se reparte el SOL." />
-                <Field label="Ancho de bin" suffix="%" value={form.binStepPct} disabled={locked} onChange={(value) => setField(setForm, markDirty, setSaved, "binStepPct", value)} hint="Separación entre bins." />
-              </Group>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" className="min-h-11 cursor-pointer px-5" disabled={locked || busy || !dirty}>
-                Guardar parámetros
-              </Button>
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                {saved ? "Guardado." : dirty ? "Hay cambios sin guardar." : `TVL ${params ? usd(params.minTvl) : "—"} · fee 24 h ${params ? usd(params.minFees24h) : "—"}.`}
-              </p>
-            </div>
-          </form>
-        ) : (
-          <p className="px-5 py-6 text-sm text-muted-foreground">Leyendo los parámetros…</p>
-        )}
-        </div>
         ) : null}
-      </section>
+      </Panel>
+
+      <footer className="num pb-2 text-center text-[11px] text-muted-foreground">01010000 01001111 01001100 01001100 01001111 · PolloTraderBot</footer>
     </main>
   );
 }
+
 
 function setField(
   setForm: (value: FormState | null | ((current: FormState | null) => FormState | null)) => void,
@@ -490,44 +465,84 @@ function signedSol(value: number): string {
 function PositionRow({ position, holding, solUsd, busy, onClose }: { position: LivePosition; holding: PortfolioRow | null; solUsd: number | null; busy: boolean; onClose: () => void }) {
   const pnl = holding?.pnlSol ?? null;
   const tone = pnl != null && pnl < 0 ? "loss" : pnl != null && pnl > 0 ? "gain" : "";
+  const tokenTone = position.tokenPct !== null && position.tokenPct < 0 ? "loss" : position.tokenPct !== null && position.tokenPct > 0 ? "gain" : "";
   return (
-    <tr className="border-b border-white/10">
-      <td className="px-4 py-3 sm:px-5">
-        <p className="font-medium">{position.name}</p>
-        <p className="num text-[11px] text-muted-foreground">{position.address.slice(0, 4)}…{position.address.slice(-4)}</p>
+    <tr className="border-b border-border/60 hover:bg-secondary/40">
+      <td className="px-3 py-2">
+        <p className="font-semibold">{position.name}</p>
+        <p className="text-[11px] text-muted-foreground">{position.address.slice(0, 4)}…{position.address.slice(-4)}</p>
       </td>
-      <td className="num px-3 py-3">{sol(position.stakeSol)}</td>
-      <td className="num px-3 py-3">
+      <td className="px-3 py-2">{sol(position.stakeSol)}</td>
+      <td className="px-3 py-2">
         <p>{holding ? sol(holding.valueSol) : "—"}</p>
         <p className="text-[11px] text-muted-foreground">
           {holding && solUsd != null ? money(holding.valueSol * solUsd) : "—"}
           {holding?.share != null ? ` · ${(holding.share * 100).toLocaleString("es-ES", { maximumFractionDigits: 1 })}%` : ""}
         </p>
       </td>
-      <td className={`num px-3 py-3 ${position.tokenPct !== null && position.tokenPct < 0 ? "loss" : position.tokenPct !== null && position.tokenPct > 0 ? "gain" : ""}`}>{pct(position.tokenPct)}</td>
-      <td className={`num px-3 py-3 ${tone}`}>
-        <p>{pct(position.positionPct)}</p>
-        <p className="text-[11px]">
-          {pnl == null ? "—" : `${signedSol(pnl)} · ${solUsd == null ? "—" : signedMoney(pnl * solUsd)}`}
+      <td className={`px-3 py-2 ${tokenTone}`}>{pct(position.tokenPct)}</td>
+      <td className={`px-3 py-2 ${tone}`}>
+        <p className={tone === "loss" ? "glow-red" : tone === "gain" ? "glow" : ""}>
+          {pnl != null && pnl > 0 ? "▲ " : pnl != null && pnl < 0 ? "▼ " : ""}
+          {pct(position.positionPct)}
         </p>
+        <p className="text-[11px]">{pnl == null ? "—" : `${signedSol(pnl)} · ${solUsd == null ? "—" : signedMoney(pnl * solUsd)}`}</p>
       </td>
-      <td className="px-3 py-3 text-muted-foreground">—</td>
-      <td className="num px-3 py-3">{hoursOpen(position.openedAt)}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground sm:px-5">{position.note || (position.closing ? "Cerrando." : "Abierta.")}</td>
-      <td className="px-4 py-3 sm:px-5">
-        <Button type="button" variant="outline" className="min-h-11 cursor-pointer" disabled={busy || position.closing} onClick={onClose}>
-          {position.closing ? "Cerrando" : "Cerrar"}
+      <td className="px-3 py-2">{hoursOpen(position.openedAt)}</td>
+      <td className="px-3 py-2 font-sans text-xs text-muted-foreground">{position.note || (position.closing ? "Cerrando." : "Abierta.")}</td>
+      <td className="px-3 py-2 text-right">
+        <Button type="button" variant="destructive" className="min-h-9 border border-destructive/60 font-bold" disabled={busy || position.closing} onClick={onClose}>
+          {position.closing ? "[CERRANDO]" : "[CLOSE]"}
         </Button>
       </td>
     </tr>
   );
 }
 
+function StatePill({ state }: { state: "BOOTING" | "RUNNING" | "STOPPED" | "KILL" }) {
+  const tone =
+    state === "RUNNING" ? "border-primary text-primary glow" : state === "KILL" ? "border-destructive text-destructive glow-red" : state === "STOPPED" ? "border-warn text-warn" : "border-border text-muted-foreground";
+  return (
+    <span className={`num inline-flex items-center gap-2 border px-2 py-0.5 text-xs font-bold tracking-widest ${tone}`}>
+      <span className={`size-2 ${state === "RUNNING" ? "animate-pulse bg-primary" : state === "KILL" ? "bg-destructive" : state === "STOPPED" ? "bg-warn" : "bg-muted-foreground"}`} />
+      {state}
+    </span>
+  );
+}
+
+function Panel({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="border border-border bg-black/80">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-secondary/30 px-3 py-1.5 text-xs">
+        <h2 className="font-bold tracking-widest">┌─[ {title} ]</h2>
+        {typeof right === "string" ? <span className="text-muted-foreground">{right}</span> : right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function BinRange({ rangePct }: { rangePct: number }) {
+  // 40 bins across the chart; Bid-Ask stacks more SOL toward the bottom of the range.
+  const bins = 40;
+  const used = Math.round((Math.min(100, Math.max(8, rangePct)) / 100) * bins);
+  return (
+    <div className="flex h-12 items-end gap-px border border-border bg-black px-1 pt-1" aria-hidden="true">
+      {Array.from({ length: bins }, (_, i) => {
+        const inside = i >= bins - used;
+        const depth = inside ? (bins - i) / used : 0;
+        return <div key={i} className={inside ? "flex-1 bg-primary/70" : "flex-1 bg-secondary/40"} style={{ height: inside ? `${20 + depth * 80}%` : "8%" }} />;
+      })}
+      <div className="ml-1 h-full w-px bg-foreground" />
+    </div>
+  );
+}
+
 function Metric({ k, v, hint }: { k: string; v: string; hint: string }) {
   return (
-    <div className="px-4 py-3 sm:px-5">
-      <p className="text-[11px] tracking-wide text-muted-foreground uppercase">{k}</p>
-      <p className="num mt-1 text-xl">{v}</p>
+    <div className="border border-border bg-black/80 px-3 py-2">
+      <p className="text-[11px] tracking-widest text-muted-foreground">&gt; {k}</p>
+      <p className="num glow mt-1 text-xl font-semibold">{v}</p>
       <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   );
@@ -535,9 +550,9 @@ function Metric({ k, v, hint }: { k: string; v: string; hint: string }) {
 
 function Readout({ k, v, text }: { k: string; v: string; text: string }) {
   return (
-    <div className="bg-[#070b14] px-4 py-4 sm:px-5">
-      <p className="text-[11px] tracking-wide text-muted-foreground uppercase">{k}</p>
-      <p className="mt-1 font-medium">{v}</p>
+    <div className="bg-black px-3 py-3">
+      <p className="text-[11px] tracking-widest text-muted-foreground">&gt; {k}</p>
+      <p className="mt-1 font-semibold">{v}</p>
       <p className="mt-1 text-xs text-muted-foreground">{text}</p>
     </div>
   );
@@ -545,8 +560,8 @@ function Readout({ k, v, text }: { k: string; v: string; text: string }) {
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-xl border border-white/10 p-3">
-      <legend className="px-1 text-[11px] tracking-wide text-muted-foreground uppercase">{title}</legend>
+    <fieldset className="flex flex-col gap-3 border border-border p-3">
+      <legend className="px-1 text-[11px] font-bold tracking-widest">[ {title} ]</legend>
       {children}
     </fieldset>
   );
@@ -571,7 +586,7 @@ function Field({
     <label className="flex flex-col gap-1">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="flex items-center gap-2">
-        <Input className="num h-11" inputMode="decimal" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+        <Input className="num h-10 bg-black" inputMode="decimal" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
         <span className="w-8 shrink-0 text-xs text-muted-foreground">{suffix}</span>
       </span>
       <span className="text-[11px] text-muted-foreground">{hint}</span>

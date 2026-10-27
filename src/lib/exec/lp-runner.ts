@@ -2,7 +2,7 @@
  * One pass of the Meteora live bot. Opens at most one position and closes
  * anything already marked. A failure records the error and does not invent a fill.
  * Exits are decided on the position's on-chain value, never on a model.
- * This never throws into the paper loop.
+ * This never throws into the loop.
  */
 
 import { randomUUID } from "node:crypto";
@@ -492,7 +492,7 @@ export async function runLiveCycle(
 
 let pending: Promise<void> | null = null;
 
-/** Fire one live pass. Never overlaps, and never throws into the paper loop. */
+/** Fire one live pass. Never overlaps, and never throws into the loop. */
 export function kickLiveLp(now = Date.now()): void {
   if (pending) return;
   const dir = walletDir();

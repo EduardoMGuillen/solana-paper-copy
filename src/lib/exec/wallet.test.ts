@@ -22,7 +22,6 @@ import {
 } from "./wallet";
 import { PAPER_LIVE_PARAMS } from "./live-params";
 import { DECODER_SHAPE } from "../lp/bidask";
-import { METEORA_NEXT_SLOT } from "../lp/livebook";
 import { DECODER_EXITS, DECODER_RULES } from "../lp/meteora";
 
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -149,7 +148,7 @@ describe("live window status", () => {
 
   it("keeps the paper defaults and refuses edits while the bot is running", async () => {
     expect(PAPER_LIVE_PARAMS).toEqual({
-      slot: METEORA_NEXT_SLOT,
+      slot: 0.1,
       minTvl: DECODER_RULES.minTvl,
       minFees24h: DECODER_RULES.minFees24h,
       minBaseFeePct: DECODER_RULES.minBaseFeePct,
