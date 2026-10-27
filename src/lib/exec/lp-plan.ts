@@ -181,7 +181,7 @@ export function choosePool(
   now = Date.now(),
 ): LiveCandidate | null {
   const ready = candidates.filter(
-    (pool) => passes(pool, rules) && oldEnough(pool, rules.minAgeDays ?? 0, now) && !busy.has(pool.address) && positionRange(range, pool.binStep, maxBins) != null,
+    (pool) => passes(pool, rules) && oldEnough(pool, rules.minAgeDays ?? 0, now) && !busy.has(pool.address) && !busy.has(pool.tokenMint) && positionRange(range, pool.binStep, maxBins) != null,
   );
   ready.sort((a, b) => b.fees24h / b.tvl - a.fees24h / a.tvl);
   return ready[0] ?? null;
@@ -245,7 +245,8 @@ export function planLiveLp(input: {
   if (closing || input.pendingOpen) {
     return { positions, open: null, notice: input.pendingOpen ? "Hay una apertura a medias. No se abre otra hasta confirmarla." : "Primero se cierran las que ya pidieron salida." };
   }
-  const busy = new Set(positions.map((position) => position.address));
+  // A token held in one pool blocks its other pools: two pools of one memecoin double the same risk.
+  const busy = new Set(positions.flatMap((position) => (position.tokenMint ? [position.address, position.tokenMint] : [position.address])));
   for (const [address, until] of Object.entries(input.skipped ?? {})) if (until > input.now) busy.add(address);
   const pool = choosePool(input.candidates, input.params, input.params.range, busy, maxBins, input.now);
   const shaped = pool ? positionRange(input.params.range, pool.binStep, maxBins) : null;

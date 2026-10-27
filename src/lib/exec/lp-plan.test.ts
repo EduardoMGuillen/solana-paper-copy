@@ -300,6 +300,24 @@ describe("live open plan", () => {
     expect(markOne({ exists: false, valueLamports: 0, price: 0 })?.closeReason).toBe("gone");
   });
 
+  it("does not open a second pool of a token it already holds", () => {
+    const other = { ...candidate(250), address: "HsG4A9hGVUAU2WQu2QtsY4acsuyoCJKKRHmy4a4YfuTm" };
+    const plan = planLiveLp({
+      running: true,
+      kill: false,
+      balanceLamports: 2_000_000_000,
+      reserveLamports: 30_000_000,
+      maxSol: 0.6,
+      params: PAPER_LIVE_PARAMS,
+      positions: [position()],
+      candidates: [other],
+      marks: {},
+      now: 2_000,
+      pendingOpen: false,
+    });
+    expect(plan.open).toBeNull();
+  });
+
   it("does not open a pool that sits out after a failed open", () => {
     const plan = planLiveLp({
       running: true,
