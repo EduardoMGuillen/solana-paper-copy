@@ -6,24 +6,28 @@
  * hides it to the tray so Meteora live keeps watching open positions; "Salir"
  * in the tray stops everything.
  *
- * The private key never crosses HTTP: the import form talks to this process over
- * IPC, and only from the app's own origin.
+ * The private key and the RPC URL never cross HTTP: the import form and the
+ * settings panel talk to this process over IPC, and only from the app's own origin.
  */
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray, utilityProcess, type UtilityProcess } from "electron";
-import { importDedicatedWallet, walletDir } from "../src/lib/exec/wallet";
-import { parseEnv } from "./env";
+import { readIntents } from "../src/lib/exec/intents";
+import { importDedicatedWallet, probeRpc, readWalletAddress, replaceDedicatedWallet, walletDir } from "../src/lib/exec/wallet";
+import { maskRpc, parseEnv, setEnvValue } from "./env";
 
 const APP_NAME = "PolloTraderBot";
 const RESTART_MS = 3_000;
+// An order younger than this may still be in flight; a restart waits for it.
+const IN_FLIGHT_MS = 120_000;
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let server: UtilityProcess | null = null;
 let origin = "";
+let port = 0;
 let quitting = false;
 
 function resource(...parts: string[]): string {
@@ -44,11 +48,12 @@ function loadConfig(): Record<string, string> {
   if (!fs.existsSync(file)) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.copyFileSync(resource("config.env.example"), file);
+    fs.chmodSync(file, 0o600);
   }
   return parseEnv(fs.readFileSync(file, "utf8"));
 }
 
-function serverEnv(port: number): NodeJS.ProcessEnv {
+function serverEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
     ...loadConfig(),
@@ -94,17 +99,18 @@ function logStream(): fs.WriteStream {
 }
 
 /** Start the server; if it dies while the app is open, start it again so live positions stay watched. */
-function startServer(port: number, env: NodeJS.ProcessEnv): void {
+function startServer(): void {
   const dir = serverDir();
   const log = logStream();
   log.write(`\n--- ${new Date().toISOString()} start on ${port}\n`);
-  server = utilityProcess.fork(path.join(dir, "server.js"), [], { cwd: dir, env, stdio: "pipe", serviceName: `${APP_NAME} server` });
+  // The env is read again on every start, so a restart picks up config.env changes.
+  server = utilityProcess.fork(path.join(dir, "server.js"), [], { cwd: dir, env: serverEnv(), stdio: "pipe", serviceName: `${APP_NAME} server` });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);
   server.on("exit", (code) => {
     log.write(`--- exit ${code}\n`);
     server = null;
-    if (!quitting) setTimeout(() => startServer(port, env), RESTART_MS);
+    if (!quitting) setTimeout(startServer, RESTART_MS);
   });
 }
 
@@ -178,12 +184,61 @@ function createTray(): void {
   tray.on("click", showWindow);
 }
 
+function liveDir(): string {
+  return walletDir({ ...process.env, ...loadConfig() });
+}
+
+/** True while the last order in the journal may still be landing. */
+function orderInFlight(): boolean {
+  const last = readIntents(liveDir()).at(-1);
+  return Boolean(last && (last.status === "pending" || last.status === "sent") && Date.now() - last.at < IN_FLIGHT_MS);
+}
+
+function fromApp(event: Electron.IpcMainInvokeEvent): boolean {
+  return sameOrigin(event.senderFrame?.url);
+}
+
+ipcMain.handle("settings:get", (event) => {
+  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
+  const config = loadConfig();
+  return { ok: true, rpc: maskRpc(config.SOLANA_RPC_URL), address: readWalletAddress(liveDir()) };
+});
+
+ipcMain.handle("rpc:save", async (event, url: unknown) => {
+  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
+  if (typeof url !== "string") return { ok: false, error: "Falta la URL." };
+  const value = url.trim();
+  try {
+    if (value) await probeRpc(value);
+    if (orderInFlight()) return { ok: false, error: "Hay una orden en curso. Prueba de nuevo en un minuto." };
+    const file = configFile();
+    fs.writeFileSync(file, setEnvValue(fs.readFileSync(file, "utf8"), "SOLANA_RPC_URL", value), { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(file, 0o600);
+    // The exit handler starts it again with the new config.
+    server?.kill();
+    return { ok: true, rpc: maskRpc(value) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "No se pudo guardar." };
+  }
+});
+
+ipcMain.handle("wallet:replace", (event, secret: unknown, address: unknown, confirm: unknown) => {
+  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
+  if (typeof secret !== "string") return { ok: false, error: "Falta la clave." };
+  if (orderInFlight()) return { ok: false, error: "Hay una orden en curso. Prueba de nuevo en un minuto." };
+  try {
+    const replaced = replaceDedicatedWallet(liveDir(), secret, typeof address === "string" ? address : "", typeof confirm === "string" ? confirm : "", serverDir());
+    return { ok: true, address: replaced };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "No se pudo cambiar la wallet." };
+  }
+});
+
 ipcMain.handle("wallet:import", (event, secret: unknown, address: unknown) => {
-  if (!sameOrigin(event.senderFrame?.url)) return { ok: false, error: "Origen no permitido." };
+  if (!fromApp(event)) return { ok: false, error: "Origen no permitido." };
   if (typeof secret !== "string") return { ok: false, error: "Falta la clave." };
   try {
-    const dir = walletDir({ ...process.env, ...loadConfig() });
-    const imported = importDedicatedWallet(dir, secret, typeof address === "string" ? address : undefined, serverDir());
+    const imported = importDedicatedWallet(liveDir(), secret, typeof address === "string" ? address : undefined, serverDir());
     return { ok: true, address: imported };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "No se pudo importar." };
@@ -214,9 +269,9 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(async () => {
-    const port = await freePort();
+    port = await freePort();
     origin = `http://127.0.0.1:${port}`;
-    startServer(port, serverEnv(port));
+    startServer();
     await waitForServer(origin);
     createWindow();
     createTray();

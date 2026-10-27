@@ -9,3 +9,34 @@ export function parseEnv(text: string): Record<string, string> {
   }
   return out;
 }
+
+/** Set KEY=value on its existing line, or append it, leaving comments and other keys as they are. */
+export function setEnvValue(text: string, key: string, value: string): string {
+  if (/[\r\n]/.test(value)) throw new Error("El valor no puede tener saltos de línea.");
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((line) => new RegExp(`^\\s*${key}\\s*=`).test(line));
+  if (at >= 0) {
+    lines[at] = `${key}=${value}`;
+    return lines.join("\n");
+  }
+  const body = text.length === 0 || text.endsWith("\n") ? text : `${text}\n`;
+  return `${body}${key}=${value}\n`;
+}
+
+function maskToken(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 4)}…${value.slice(-3)}` : value;
+}
+
+/** The RPC URL without its secrets, safe to show on screen: long path tokens and query values are cut. */
+export function maskRpc(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return "(URL inválida)";
+  }
+  const pathPart = url.pathname.split("/").map(maskToken).join("/");
+  const query = [...url.searchParams].map(([key, value]) => `${key}=${maskToken(value)}`).join("&");
+  return `${url.host}${pathPart}${query ? `?${query}` : ""}`;
+}

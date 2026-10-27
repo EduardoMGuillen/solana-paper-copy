@@ -1,29 +1,16 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
+import { useDesktop } from "@/components/desktop-bridge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
-type ImportResult = { ok: boolean; address?: string; error?: string };
-
-declare global {
-  interface Window {
-    /** Present only inside the desktop app (desktop/preload.ts). */
-    pollo?: { importWallet: (secret: string, address: string) => Promise<ImportResult> };
-  }
-}
-
-function noSubscribe(): () => void {
-  return () => {};
-}
 
 /**
  * Shown while there is no dedicated wallet. In the desktop app the key goes over IPC
  * to the main process, never over HTTP. In a browser the page only shows the CLI command.
  */
 export function WalletImport({ onImported }: { onImported: () => void }) {
-  // The bridge never changes after load; the server render assumes a browser.
-  const desktop = useSyncExternalStore(noSubscribe, () => Boolean(window.pollo), () => false);
+  const desktop = useDesktop();
   const [secret, setSecret] = useState("");
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,8 +35,8 @@ export function WalletImport({ onImported }: { onImported: () => void }) {
         event.preventDefault();
         setBusy(true);
         setError(null);
-        void window
-          .pollo!.importWallet(secret, address)
+        void desktop
+          .importWallet(secret, address)
           .then((result) => {
             if (result.ok) {
               setSecret("");

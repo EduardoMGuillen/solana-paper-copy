@@ -9,6 +9,8 @@ import {
   decodeBase58,
   encodeBase58,
   importDedicatedWallet,
+  probeRpc,
+  replaceDedicatedWallet,
   parseAccountLamports,
   parseLamports,
   portfolioView,
@@ -385,5 +387,74 @@ describe("rpc url", () => {
 
   it("ignores a rebate address that is not a Solana address", () => {
     expect(rpcUrl({ SOLANA_RPC_URL: helius, HELIUS_REBATE_ADDRESS: "nope" })).toBe(helius);
+  });
+});
+
+describe("replace wallet", () => {
+  function withWallet() {
+    const dir = tempDir();
+    const old = Keypair.generate();
+    importDedicatedWallet(dir, encodeBase58(old.secretKey));
+    fs.appendFileSync(path.join(dir, "intents.jsonl"), `${JSON.stringify({ id: "a", at: 1, kind: "open", pool: "p", status: "confirmed" })}\n`);
+    return { dir, old: old.publicKey.toBase58() };
+  }
+
+  it("backs up the old key and journal, then imports the new one", () => {
+    const { dir, old } = withWallet();
+    const next = Keypair.generate();
+    const address = replaceDedicatedWallet(dir, encodeBase58(next.secretKey), "", old.slice(-4), process.cwd(), Date.UTC(2026, 9, 27, 12));
+    expect(address).toBe(next.publicKey.toBase58());
+    expect(readWalletAddress(dir)).toBe(address);
+    const backup = path.join(dir, `wallet-${old}-20261027-120000.json`);
+    expect(fs.existsSync(backup)).toBe(true);
+    if (process.platform !== "win32") expect(fs.statSync(backup).mode & 0o777).toBe(0o600);
+    expect(fs.existsSync(path.join(dir, `intents-${old}-20261027-120000.jsonl`))).toBe(true);
+    expect(fs.readFileSync(path.join(dir, "intents.jsonl"), "utf8")).toBe("");
+  });
+
+  it("asks for the last 4 characters of the current address", () => {
+    const { dir, old } = withWallet();
+    expect(() => replaceDedicatedWallet(dir, encodeBase58(Keypair.generate().secretKey), "", "xxxx")).toThrow(/últimos 4/);
+    expect(readWalletAddress(dir)).toBe(old);
+  });
+
+  it("refuses while the bot runs or holds positions or leftover tokens", () => {
+    const { dir, old } = withWallet();
+    const next = encodeBase58(Keypair.generate().secretKey);
+    setLiveBot(dir, true);
+    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/STOP/);
+    setLiveBot(dir, false);
+    writeLiveFile(dir, { ...readLiveFile(dir), positions: [{ address: WSOL, name: "X-SOL", stakeSol: 0.1, openedAt: 1, signature: "s", closing: false, closeReason: null, tokenPct: null, positionPct: null, note: "" } as never] });
+    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/posiciones/);
+    writeLiveFile(dir, { ...readLiveFile(dir), positions: [], leftovers: [{ pool: WSOL, name: "X-SOL", tokenMint: WSOL, solIsY: true, since: 1, triedAt: 1 }] });
+    expect(() => replaceDedicatedWallet(dir, next, "", old.slice(-4))).toThrow(/tokens/);
+    expect(readWalletAddress(dir)).toBe(old);
+  });
+
+  it("checks the new key before touching the old one", () => {
+    const { dir, old } = withWallet();
+    expect(() => replaceDedicatedWallet(dir, "basura", "", old.slice(-4))).toThrow(/clave privada/);
+    expect(readWalletAddress(dir)).toBe(old);
+  });
+
+  it("imports normally when there is no wallet yet", () => {
+    const dir = tempDir();
+    const next = Keypair.generate();
+    expect(replaceDedicatedWallet(dir, encodeBase58(next.secretKey), "", "")).toBe(next.publicKey.toBase58());
+  });
+});
+
+describe("probe rpc", () => {
+  const reply = (body: unknown, ok = true) => async () => ({ ok, json: async () => body }) as Response;
+
+  it("accepts an RPC that returns a slot", async () => {
+    await expect(probeRpc("https://rpc.example", reply({ result: 123 }))).resolves.toBeUndefined();
+  });
+
+  it("refuses non-https URLs and failing RPCs without echoing the URL", async () => {
+    await expect(probeRpc("http://rpc.example/?api-key=secret", reply({ result: 1 }))).rejects.toThrow(/https/);
+    const error = await probeRpc("https://rpc.example/?api-key=secret", reply({}, false)).catch((cause: Error) => cause);
+    expect((error as Error).message).not.toContain("secret");
+    await expect(probeRpc("https://rpc.example", reply({ error: { code: -32_000 } }))).rejects.toThrow();
   });
 });

@@ -155,3 +155,10 @@ Agrega una entrada cada vez que Claude haga un commit.
 - Cada estrategia se valida walk-forward por mercado.
 - El live usa el mismo paso de barra que el backtest, y un test de paridad lo comprueba.
 - Sizing por riesgo, stops ATR, y halts por pérdida diaria y por drawdown.
+
+## Ajustes en la app: RPC y cambio de wallet
+
+- Botón **⚙ ajustes** en el encabezado. RPC: muestra la URL enmascarada, prueba la nueva con `getSlot` antes de guardarla, la escribe en `config.env` (0600) y reinicia el servidor interno. No reinicia si hay una orden de menos de 2 min sin confirmar.
+- Wallet: cambiarla solo con el bot en STOP, sin posiciones ni tokens pendientes, y escribiendo los últimos 4 caracteres de la actual. La clave vieja y su journal quedan como `wallet-<dirección>-<fecha>.json` e `intents-<dirección>-<fecha>.jsonl`.
+- Primer arranque: después de importar la llave, paso 2 opcional para el RPC ("Para mayor velocidad agrega un RPC de Helius o QuickNode").
+- Todo va por IPC de la app de escritorio, nunca por HTTP. En el navegador la sección solo explica qué archivo editar.

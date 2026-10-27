@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
+import { RpcForm, SettingsPanel } from "@/components/settings-panel";
 import { WalletImport } from "@/components/wallet-import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,6 +99,9 @@ export function WalletLive() {
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // First run: after the key, offer the RPC once. It can be skipped.
+  const [rpcSetup, setRpcSetup] = useState(false);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
 
@@ -229,6 +233,14 @@ export function WalletLive() {
               <span className="glow">{status?.balanceSol == null ? "—" : sol(status.balanceSol)}</span>
               {status?.balanceUsd != null ? <span className="text-xs text-muted-foreground">{money(status.balanceUsd)}</span> : null}
             </div>
+            <button
+              type="button"
+              className="flex min-h-10 items-center border border-border px-3 text-sm hover:border-primary aria-pressed:border-primary aria-pressed:text-primary"
+              aria-pressed={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              ⚙ ajustes
+            </button>
             <Button type="button" className="glow-none min-h-10 px-5 font-bold tracking-widest" disabled={!status || busy || running || status.kill} aria-pressed={running} onClick={() => void post({ running: true })}>
               ▶ START
             </Button>
@@ -258,9 +270,26 @@ export function WalletLive() {
         </div>
       </Panel>
 
+      {settingsOpen ? (
+        <Panel title="ajustes" right={<button type="button" className="text-xs text-muted-foreground hover:text-primary" onClick={() => setSettingsOpen(false)}>[cerrar]</button>}>
+          <SettingsPanel running={running} positions={status?.positions?.length ?? 0} onChanged={() => setReload((n) => n + 1)} />
+        </Panel>
+      ) : null}
+
       {status && !status.address ? (
-        <Panel title="wallet.import">
-          <WalletImport onImported={() => setReload((n) => n + 1)} />
+        <Panel title="wallet.import · paso 1 de 2">
+          <WalletImport
+            onImported={() => {
+              setRpcSetup(true);
+              setReload((n) => n + 1);
+            }}
+          />
+        </Panel>
+      ) : null}
+
+      {rpcSetup ? (
+        <Panel title="rpc.setup · paso 2 de 2 (opcional)">
+          <RpcForm current={null} onSaved={() => setRpcSetup(false)} onSkip={() => setRpcSetup(false)} />
         </Panel>
       ) : null}
 

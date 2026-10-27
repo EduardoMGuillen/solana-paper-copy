@@ -281,6 +281,62 @@ export function importDedicatedWallet(dir: string, secretText: string, expectedA
   return address;
 }
 
+function stamp(now: number): string {
+  return new Date(now).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/**
+ * Swap the dedicated wallet for another one. Only with the bot stopped and nothing left on chain:
+ * positions and leftover tokens belong to the old key, and the bot could not close them anymore.
+ * The old key and its journal are kept next to it, renamed, never deleted.
+ */
+export function replaceDedicatedWallet(dir: string, secretText: string, expectedAddress: string, confirm: string, cwd = process.cwd(), now = Date.now()): string {
+  assertOutsideRepo(dir, cwd);
+  const current = readWalletAddress(dir);
+  if (!current) return importDedicatedWallet(dir, secretText, expectedAddress, cwd);
+  const secret = parseSecret(secretText);
+  if (!publicFromSeed(Buffer.from(secret.subarray(0, 32))).equals(secret.subarray(32))) throw new Error("La clave privada no es válida: su mitad pública no corresponde.");
+  const address = encodeBase58(secret.subarray(32));
+  if (expectedAddress.trim() && expectedAddress.trim() !== address) throw new Error("La clave no corresponde a la dirección que indicaste.");
+  if (address === current) return current;
+  if (confirm.trim() !== current.slice(-4)) throw new Error("Escribe los últimos 4 caracteres de la wallet actual para confirmar.");
+  const live = readLiveFile(dir);
+  if (live.running) throw new Error("Primero dale STOP al bot.");
+  if (live.positions.length > 0) throw new Error("Todavía hay posiciones abiertas con la wallet actual. Ciérralas antes de cambiarla.");
+  if (live.leftovers.length > 0) throw new Error("Quedan tokens por vender en la wallet actual. Espera a que el bot los venda.");
+
+  const tag = `${current}-${stamp(now)}`;
+  fs.renameSync(secretFile(dir), path.join(dir, `wallet-${tag}.json`));
+  fs.renameSync(addressFile(dir), path.join(dir, `wallet-${tag}.address`));
+  const journal = path.join(dir, "intents.jsonl");
+  if (fs.existsSync(journal)) fs.renameSync(journal, path.join(dir, `intents-${tag}.jsonl`));
+  return importDedicatedWallet(dir, secretText, expectedAddress, cwd);
+}
+
+/** One cheap call to check that a URL is a working Solana RPC. Errors never echo the URL: it may carry an API key. */
+export async function probeRpc(url: string, post: RpcPost = fetch): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    throw new Error("No es una URL válida.");
+  }
+  if (parsed.protocol !== "https:") throw new Error("La URL del RPC tiene que empezar con https://");
+  let body: { result?: unknown } | null = null;
+  try {
+    const response = await post(parsed.toString(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot" }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (response.ok) body = (await response.json()) as { result?: unknown };
+  } catch {
+    body = null;
+  }
+  if (typeof body?.result !== "number") throw new Error("El RPC no respondió. Revisa la URL y la API key.");
+}
+
 /** Wallet SOL plus each position's marked liquidity and its account rent. */
 export function portfolioView(
   balanceSol: number | null,
