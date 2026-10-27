@@ -8,18 +8,26 @@ It puts SOL into Bid-Ask pools below the price, and closes each position at take
 
 ## Strategy
 
-Every 15 s, if there is free SOL, the bot picks, among the token/SOL pools that pass the filter, the one that earns the most fees for its liquidity. It puts 25% of the free SOL below the price, Bid-Ask shaped down to −75%. It closes at +8%, at −20% or after 24 h, measured with the real on-chain value of the position. If the price drops 20% between two readings, it closes immediately.
+Every 15 s, if there is free SOL, the bot picks, among the token/SOL pools that pass the filter, the one that earns the most fees for its liquidity. It skips tokens it already holds in another pool, since two pools of one memecoin double the same risk. It puts 25% of the wallet's SOL below the price, Bid-Ask shaped down to −75%, never more than the room left under `LIVE_LP_MAX_SOL` and never touching `LIVE_MIN_SOL_RESERVE`. With the default profile it closes at +8%, at −20% or after 24 h, measured with the real on-chain value of the position. If the price drops 20% between two readings, it closes immediately.
 
 Hourly backtest over the last month (Sep 26 – Oct 26, 2026, 105 SOL pools), in SOL, where holding SOL = 0%:
 
-| Profile | Realistic fees | Pessimistic fees | Worst position |
-|---|---|---|---|
-| **Recommended** (default) | +5% to +7% | −2% to 0% | −21% |
-| Conservative (pools 14+ days old, TVL 50k+) | −2% to −4% | −4% to −5% | −10% |
-| Aggressive | +23% to +24% | +6% to +7% | −8% (only 36 positions) |
-| The previous strategy (10%, reopen at +10%) | −7% to −17% | −10% to −20% | −21% |
+| Profile | Pools | Exits | Realistic fees | Pessimistic fees | Worst position |
+|---|---|---|---|---|---|
+| **Recommended** (default) | TVL 10k+, fees 1k+/24 h | +8% / −20% / 24 h | +5% to +7% | −2% to 0% | −21% |
+| Conservative | TVL 50k+, fees 2k+/24 h, 14+ days old | +8% / −20% / 24 h | −2% to −4% | −4% to −5% | −10% |
+| Aggressive | TVL 5k+, fees 500+/24 h | +12% / −30% / 48 h | +23% to +24% | +6% to +7% | −8% (only 36 positions) |
+| The previous strategy (10%, reopen at +10%) | | | −7% to −17% | −10% to −20% | −21% |
 
 This is **a single month**. The history only includes pools that are still alive and uses today's TVL, so pools that sank do not count. Reality is probably worse. The `history` panel records the real result of every closed position: that is the measure that counts.
+
+### Costs per position
+
+- **Position rent:** ~0.06 SOL, plus ~0.0006 SOL per bin past 70 on extended positions (`LIVE_MAX_POSITION_BINS`). It comes back on close.
+- **New bin arrays:** 0.0714 SOL each, never returned. Opens that need one are refused unless `LIVE_MAX_BIN_ARRAY_RENT_SOL` allows it.
+- **Network:** a priority fee per transaction (`LIVE_PRIORITY_MICROLAMPORTS`, ~0.00001 SOL by default), and price impact when the leftover token is sold back to SOL on close.
+
+With `LIVE_LP_MAX_SOL=0.3` (the default) and 25% per position, about 1 SOL in the wallet is a comfortable start.
 
 ## Desktop app
 
@@ -47,6 +55,12 @@ This is **a single month**. The history only includes pools that are still alive
 - **Configuration:** tray → *Open config folder* opens the data folder. It holds `config.env`, with Telegram, your own RPC and the `LIVE_*` limits; the template is [.env.example](.env.example). After changing it, quit and reopen the app.
 - **Helius rebates:** with a Helius RPC the app adds `rebate-address` to the URL, and by default MEV rebates go to the author's wallet (`J723mhkAUyjKrR469XfHeMC2wGfcCU6EACMQtW6dQDBd`). To collect them yourself, put your address in `HELIUS_REBATE_ADDRESS`; to turn it off, set `off`.
 - **Server log:** `logs/server.log`, in that same folder.
+
+### Telegram and the kill switch
+
+- With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `config.env`, the bot reports every open and close, with the profit or loss of each position, and sends a status digest every 15 min.
+- That chat can send `balance`, `status`, `close`, `close <name>` and `stop` (closes all and stops opening). It cannot start the bot. Messages from any other chat are ignored.
+- **Emergency stop:** create an empty file named `KILL` in the wallet folder (`~/.solana-paper-bot`). While it exists, the bot signs nothing.
 
 ### Build the installers
 
@@ -88,6 +102,12 @@ In a browser, the `wallet.import` panel only shows the `npm run wallet -- import
 ### 24/7 server
 
 To run it on a VM with HTTPS and a password, follow [deploy/GUIA-GOOGLE-CLOUD.md](deploy/GUIA-GOOGLE-CLOUD.md). The VM uses `next start`, not the desktop app.
+
+> **Out of date:** that guide and `deploy/install.sh` still describe the old paper bot, and the script installs the `main` branch by default. To deploy PolloTraderBot, run it as `sudo env BRANCH=pollotraderbot bash install.sh` and put the `LIVE_*` limits in `/etc/solana-bot.env`.
+
+### Landing page
+
+[landing/index.html](landing/index.html) is a static product page (early-access list and an NFT mint marked "coming soon"). It is not part of the app and is not built by `npm run build`; open the file or host the `landing/` folder as is.
 
 ## History
 
