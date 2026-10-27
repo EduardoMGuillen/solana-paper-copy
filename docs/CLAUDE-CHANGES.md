@@ -6,6 +6,20 @@ Agrega una entrada cada vez que Claude haga un commit.
 
 ---
 
+## 2026-10-26 · `fbc5e3c` · Meteora live: sin reabrir al +10%, 25% por defecto, filtro de antigüedad e historial
+
+**Qué cambió:**
+- Se quitó el cierre al +10% para reabrir más arriba.
+- El perfil por defecto es **Recomendado**: 25% por posición, con el filtro y las salidas Decoder. Los perfiles ahora son Recomendado, Conservador (pools de 14+ días y TVL de 50k+) y Agresivo, y cada uno muestra sus números del backtest.
+- Parámetro nuevo `minAgeDays`: salta los pools más nuevos que eso, y los de antigüedad desconocida si se exige alguna.
+- Cada cierre confirmado se guarda en `bot.json` (los últimos 200), con la última lectura en la cadena. El panel `history` muestra la lista y el resultado total.
+
+**Por qué:**
+- Un backtest por hora del 26 sep al 26 oct de 2026, con 105 pools, dio entre −7% y −17% en el mes para la configuración anterior.
+- 3 de cada 4 salidas eran el cierre al +10%, que casi no cobraba comisiones y pagaba transacciones en cada vuelta.
+- La renta de ~0.1 SOL por posición dejaba posiciones de ~0.025 SOL con el 10%.
+- Sin esa regla y con el 25%, el mismo backtest da +5% a +7% con comisiones realistas. Es un solo mes, con sesgo hacia los pools que sobrevivieron.
+
 ## 2026-10-26 · `3f167c1` · App de escritorio para Windows y Linux
 
 **Qué cambió:**
